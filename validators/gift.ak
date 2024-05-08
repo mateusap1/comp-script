@@ -1,7 +1,7 @@
 use aiken/dict
 use aiken/list
 use aiken/transaction.{Mint, ScriptContext, Spend, Transaction}
-use aiken/transaction/credential
+use aiken/transaction/credential.{ScriptCredential}
 use aiken/transaction/value
 use vote/gift.{
   AddVote, Admin, BurnAction, ListVote, MintAction, MintRedeemer, Moderator,
@@ -137,7 +137,25 @@ validator(pricing: Pricing) {
                 owner_asset_name,
                 redeemer.owner,
               )
-        let has_right_role = datum.role == Vote
+
+        expect Some(owner_script_reference) =
+          context.transaction.reference_inputs
+            |> list.find(
+                fn(input) {
+                  when input.output.address.payment_credential is {
+                    ScriptCredential(credential) -> credential == policy_id
+                    _ -> False
+                  }
+                },
+              )
+
+        let owner_script_reference_datum =
+          gift.find_datum(owner_script_reference.output)
+
+        let correct_owner_reference =
+          owner_script_reference_datum.asset_name == owner_asset_name
+
+        let has_right_role = owner_script_reference_datum.role == Vote
         let nft_is_listed = datum.is_listed == True
 
         let output =
@@ -162,6 +180,7 @@ validator(pricing: Pricing) {
 
         and {
           can_add_vote_nft?,
+          correct_owner_reference?,
           has_right_role?,
           nft_is_listed?,
           vote_not_repeated?,
