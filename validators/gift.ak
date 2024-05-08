@@ -138,6 +138,8 @@ validator(pricing: Pricing) {
                 redeemer.owner,
               )
 
+        let not_voting_himself = datum.asset_name != owner_asset_name
+
         expect Some(owner_script_reference) =
           context.transaction.reference_inputs
             |> list.find(
@@ -180,6 +182,7 @@ validator(pricing: Pricing) {
 
         and {
           can_add_vote_nft?,
+          not_voting_himself?,
           correct_owner_reference?,
           has_right_role?,
           nft_is_listed?,
