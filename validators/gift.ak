@@ -4,7 +4,7 @@ use aiken/transaction.{Mint, ScriptContext, Spend, Transaction}
 use aiken/transaction/credential.{ScriptCredential}
 use aiken/transaction/value
 use vote/gift.{
-  AddVote, BurnAction, ListVote, MintAction, MintRedeemer, Moderator,
+  AddVote, Approve, BurnAction, ListVote, MintAction, MintRedeemer, Moderator,
   NftStoreDatum, Pricing, SpendRedeemer, Unlock, User, Vote,
 }
 
@@ -199,6 +199,60 @@ validator(pricing: Pricing) {
           has_right_role?,
           nft_is_listed?,
           vote_not_repeated?,
+          correct_value?,
+          correct_datum?,
+        }
+      }
+      Approve(owner_asset_name) -> {
+        let vote_nft_present =
+          context.transaction
+            |> gift.permission_redeem_nft(
+                policy_id,
+                owner_asset_name,
+                redeemer.owner,
+              )
+
+        expect Some(owner_script_reference) =
+          context.transaction.reference_inputs
+            |> list.find(
+                fn(input) {
+                  when input.output.address.payment_credential is {
+                    ScriptCredential(credential) -> credential == policy_id
+                    _ -> False
+                  }
+                },
+              )
+
+        let owner_script_reference_datum =
+          gift.find_datum(owner_script_reference.output)
+
+        let correct_owner_reference =
+          owner_script_reference_datum.asset_name == owner_asset_name
+
+        let has_right_role = owner_script_reference_datum.role == Moderator
+        let nft_is_listed = datum.is_listed == True
+        let nft_is_not_approved = datum.is_approved == False
+
+        let output =
+          context.transaction.outputs
+            |> gift.find_output_with_address(script_input.output.address)
+
+        let output_datum = gift.find_datum(output)
+
+        let correct_value =
+          value.lovelace_of(output.value) >= value.lovelace_of(
+            script_input.output.value,
+          )
+
+        let correct_datum =
+          output_datum == NftStoreDatum { ..datum, is_approved: True }
+
+        and {
+          vote_nft_present?,
+          correct_owner_reference?,
+          has_right_role?,
+          nft_is_listed?,
+          nft_is_not_approved?,
           correct_value?,
           correct_datum?,
         }

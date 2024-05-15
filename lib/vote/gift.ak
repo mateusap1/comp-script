@@ -38,6 +38,7 @@ pub type MintRedeemer {
 pub type SpendAction {
   ListVote
   AddVote { owner_asset_name: AssetName }
+  Approve { owner_asset_name: AssetName }
   Unlock
 }
 
@@ -50,6 +51,7 @@ pub type NftStoreDatum {
   asset_name: AssetName,
   role: Role,
   is_listed: Bool,
+  is_approved: Bool,
   votes: List<AssetName>,
 }
 
@@ -210,6 +212,7 @@ pub fn validate_token(
       datum.role == role,
       datum.votes == [],
       datum.is_listed == False,
+      datum.is_approved == False,
       datum.asset_name == asset_name,
     }
 
