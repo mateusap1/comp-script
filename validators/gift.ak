@@ -4,8 +4,8 @@ use aiken/transaction.{Mint, ScriptContext, Spend, Transaction}
 use aiken/transaction/credential.{ScriptCredential}
 use aiken/transaction/value
 use vote/gift.{
-  AddVote, Approve, BurnAction, ListVote, MintAction, MintRedeemer, Moderator,
-  NftStoreDatum, Pricing, SpendRedeemer, Unlock, User, Vote,
+  AddVote, BurnAction, ListVote, MintAction, MintRedeemer, Moderator,
+  NftStoreDatum, Pricing, Review, SpendRedeemer, Unlock, User, Vote,
 }
 
 validator(pricing: Pricing) {
@@ -237,7 +237,7 @@ validator(pricing: Pricing) {
           correct_datum?,
         }
       }
-      Approve(owner_asset_name) -> {
+      Review(owner_asset_name, approve) -> {
         let vote_nft_present =
           context.transaction
             |> gift.permission_redeem_nft(
@@ -264,8 +264,8 @@ validator(pricing: Pricing) {
           owner_script_reference_datum.asset_name == owner_asset_name
 
         let has_right_role = owner_script_reference_datum.role == Moderator
-        let nft_is_listed = datum.is_listed == True
-        let nft_is_not_approved = datum.is_approved == False
+        let correct_initial_state =
+          datum.is_listed && !datum.is_approved && !datum.is_rejected
 
         let output =
           context.transaction.outputs
@@ -289,14 +289,17 @@ validator(pricing: Pricing) {
           )
 
         let correct_datum =
-          output_datum == NftStoreDatum { ..datum, is_approved: True }
+          output_datum == NftStoreDatum {
+            ..datum,
+            is_approved: approve,
+            is_rejected: !approve,
+          }
 
         and {
           vote_nft_present?,
           correct_owner_reference?,
           has_right_role?,
-          nft_is_listed?,
-          nft_is_not_approved?,
+          correct_initial_state?,
           valid_script_input?,
           valid_script_output?,
           correct_value?,

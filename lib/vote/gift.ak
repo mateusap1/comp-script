@@ -38,7 +38,7 @@ pub type MintRedeemer {
 pub type SpendAction {
   ListVote
   AddVote { owner_asset_name: AssetName }
-  Approve { owner_asset_name: AssetName }
+  Review { owner_asset_name: AssetName, approve: Bool }
   Unlock
 }
 
@@ -52,6 +52,7 @@ pub type NftStoreDatum {
   role: Role,
   is_listed: Bool,
   is_approved: Bool,
+  is_rejected: Bool,
   votes: List<AssetName>,
 }
 
@@ -211,12 +212,14 @@ pub fn validate_token(
 
   let datum = find_datum(script_output)
 
-  let correct_output_datum = and {
-      datum.role == role,
-      datum.votes == [],
-      datum.is_listed == False,
-      datum.is_approved == False,
-      datum.asset_name == asset_name,
+  let correct_output_datum =
+    datum == NftStoreDatum {
+      role,
+      votes: [],
+      is_listed: False,
+      is_approved: False,
+      is_rejected: False,
+      asset_name,
     }
 
   let mint_correct_token =
