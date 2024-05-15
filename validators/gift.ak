@@ -41,13 +41,13 @@ validator(pricing: Pricing) {
         let mints_length = list.length(mints)
         let correct_num_outputs = list.length(script_outputs) == mints_length
 
+        let minted_value = context.transaction.mint |> value.from_minted_value
+
         let correct_num_mints =
-          (
-            context.transaction.mint
-              |> value.from_minted_value
-              |> value.tokens(policy_id)
-              |> dict.size
-          ) == mints_length * 2
+          ( minted_value |> value.tokens(policy_id) |> dict.size ) == mints_length + 1
+
+        let correct_num_mints_valid =
+          value.quantity_of(minted_value, policy_id, "valid") == mints_length
 
         let correct_tokens =
           list.zip(mints, script_outputs)
@@ -63,7 +63,7 @@ validator(pricing: Pricing) {
                 },
               )
 
-        correct_num_outputs? && correct_num_mints? && correct_tokens?
+        correct_num_outputs? && correct_num_mints? && correct_num_mints_valid? && correct_tokens?
       }
       BurnAction -> {
         expect [(_, mint_amount)] =
