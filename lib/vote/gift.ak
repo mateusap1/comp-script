@@ -24,8 +24,14 @@ pub type Pricing {
   user: Int,
 }
 
+pub type MintData {
+  role: Role,
+  output_reference: OutputReference,
+  asset_name: AssetName,
+}
+
 pub type MintRedeemer {
-  MintAction { role: Role, output_reference: OutputReference }
+  MintAction { mints: List<MintData>, index_output_range: (Int, Int) }
   BurnAction
 }
 
@@ -96,6 +102,33 @@ pub fn permission_redeem_nft(
   nft_present_in_reference && signed_by_owner
 }
 
+pub fn correct_nft_name_mint(
+  tx: Transaction,
+  output_reference: OutputReference,
+  assert_asset_name: AssetName,
+) {
+  let output_reference_index_one_byte = output_reference.output_index < 256
+
+  let output_reference_present_input =
+    when tx.inputs |> transaction.find_input(output_reference) is {
+      Some(_) -> True
+      _ -> False
+    }
+
+  let expected_asset_name =
+    output_reference.transaction_id.hash
+      |> bytearray.slice(0, 30)
+      |> bytearray.push(output_reference.output_index)
+
+  let correct_asset_name = expected_asset_name == assert_asset_name
+
+  and {
+    output_reference_index_one_byte,
+    output_reference_present_input,
+    correct_asset_name,
+  }
+}
+
 pub fn unique_token_minted(
   tx: Transaction,
   output_reference: OutputReference,
@@ -143,4 +176,45 @@ pub fn find_output_with_address(
     outputs |> list.filter(fn(out) { out.address == address })
 
   script_output
+}
+
+pub fn validate_token(
+  pricing: Pricing,
+  tx: Transaction,
+  policy_id: PolicyId,
+  mint_data: MintData,
+  script_output: Output,
+) -> Bool {
+  let MintData { role, output_reference, asset_name } = mint_data
+
+  let correct_mint =
+    (
+      tx.mint
+        |> value.from_minted_value
+        |> value.quantity_of(policy_id, asset_name)
+    ) == 1
+
+  let script_output_lovelace = script_output.value |> value.lovelace_of
+
+  let correct_output_value =
+    script_output_lovelace >= when role is {
+      Admin -> pricing.admin
+      Moderator -> pricing.moderator
+      Vote -> pricing.vote
+      User -> pricing.user
+    }
+
+  let datum = find_datum(script_output)
+
+  let correct_output_datum = and {
+      datum.role == role,
+      datum.votes == [],
+      datum.is_listed == False,
+      datum.asset_name == asset_name,
+    }
+
+  let mint_correct_token =
+    tx |> correct_nft_name_mint(output_reference, asset_name)
+
+  correct_mint? && correct_output_value? && correct_output_datum? && mint_correct_token?
 }

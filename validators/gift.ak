@@ -4,7 +4,7 @@ use aiken/transaction.{Mint, ScriptContext, Spend, Transaction}
 use aiken/transaction/credential.{ScriptCredential}
 use aiken/transaction/value
 use vote/gift.{
-  AddVote, Admin, BurnAction, ListVote, MintAction, MintRedeemer, Moderator,
+  AddVote, BurnAction, ListVote, MintAction, MintRedeemer, Moderator,
   NftStoreDatum, Pricing, SpendRedeemer, Unlock, User, Vote,
 }
 
@@ -15,43 +15,55 @@ validator(pricing: Pricing) {
     let script_address = credential.from_script(policy_id)
 
     when redeemer is {
-      MintAction { role, output_reference } -> {
-        let receiver_output =
+      MintAction { mints, index_output_range } -> {
+        // Make sure start_output_index is greater than zero
+        let (start_index, end_index) = index_output_range
+
+        // First let's get the script outputs
+        let (script_outputs, _) =
           context.transaction.outputs
-            |> gift.find_output_with_address(script_address)
-
-        let receiver_output_lovelace =
-          receiver_output.value |> value.lovelace_of
-
-        let correct_output_value =
-          receiver_output_lovelace >= when role is {
-            Admin -> pricing.admin
-            Moderator -> pricing.moderator
-            Vote -> pricing.vote
-            User -> pricing.user
-          }
-
-        let datum = gift.find_datum(receiver_output)
-
-        // Name is being verified by unique_token_minted function
-        let correct_output_datum = and {
-            datum.role == role,
-            datum.votes == [],
-          }
-
-        let minted_unique_token =
-          context.transaction
-            |> gift.unique_token_minted(
-                output_reference,
-                policy_id,
-                datum.asset_name,
+            |> list.foldr(
+                ([], 0),
+                fn(output, acc) {
+                  let (outputs_acc, idx) = acc
+                  if and {
+                    idx >= start_index,
+                    idx <= end_index,
+                    output.address == script_address,
+                  } {
+                    ([output, ..outputs_acc], idx + 1)
+                  } else {
+                    (outputs_acc, idx + 1)
+                  }
+                },
               )
 
-        and {
-          correct_output_value?,
-          correct_output_datum?,
-          minted_unique_token?,
-        }
+        let mints_length = list.length(mints)
+        let correct_num_outputs = list.length(script_outputs) == mints_length
+
+        let correct_num_mints =
+          (
+            context.transaction.mint
+              |> value.from_minted_value
+              |> value.tokens(policy_id)
+              |> dict.size
+          ) == mints_length
+
+        let correct_tokens =
+          list.zip(mints, script_outputs)
+            |> list.all(
+                fn(token_data) {
+                  gift.validate_token(
+                    pricing,
+                    context.transaction,
+                    policy_id,
+                    token_data.1st,
+                    token_data.2nd,
+                  )
+                },
+              )
+
+        correct_num_outputs? && correct_num_mints? && correct_tokens?
       }
       BurnAction -> {
         expect [(_, mint_amount)] =
