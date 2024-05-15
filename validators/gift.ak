@@ -47,7 +47,7 @@ validator(pricing: Pricing) {
               |> value.from_minted_value
               |> value.tokens(policy_id)
               |> dict.size
-          ) == mints_length
+          ) == mints_length * 2
 
         let correct_tokens =
           list.zip(mints, script_outputs)
@@ -104,16 +104,24 @@ validator(pricing: Pricing) {
           context.transaction.outputs
             |> list.all(fn(out) { out.address != script_address })
 
-        expect [(asset_name, amount)] =
-          context.transaction.mint
-            |> value.from_minted_value
-            |> value.tokens(policy_id)
-            |> dict.to_list()
+        let minted_value = context.transaction.mint |> value.from_minted_value
 
-        let correct_asset_name = asset_name == datum.asset_name
-        let correct_amount = amount == -1
+        let correct_num_burns =
+          ( minted_value |> value.tokens(policy_id) |> dict.size ) == 2
 
-        can_redeem_nft? && script_output_dissapeared? && correct_asset_name? && correct_amount?
+        let correct_burn_nft =
+          ( minted_value |> value.quantity_of(policy_id, datum.asset_name) ) == -1
+
+        let correct_burn_valid_token =
+          ( minted_value |> value.quantity_of(policy_id, "valid") ) == -1
+
+        and {
+          can_redeem_nft?,
+          script_output_dissapeared?,
+          correct_num_burns?,
+          correct_burn_nft?,
+          correct_burn_valid_token?,
+        }
       }
       ListVote -> {
         let can_list_vote_nft =
@@ -131,6 +139,12 @@ validator(pricing: Pricing) {
 
         let output_datum = gift.find_datum(output)
 
+        let valid_script_input =
+          value.quantity_of(script_input.output.value, policy_id, "valid") == 1
+
+        let valid_script_output =
+          value.quantity_of(output.value, policy_id, "valid") == 1
+
         let correct_value =
           value.lovelace_of(output.value) >= value.lovelace_of(
             script_input.output.value,
@@ -139,8 +153,16 @@ validator(pricing: Pricing) {
         let correct_datum =
           output_datum == NftStoreDatum { ..datum, is_listed: True }
 
-        can_list_vote_nft? && has_right_role? && correct_datum? && correct_value?
+        and {
+          can_list_vote_nft?,
+          has_right_role?,
+          valid_script_input?,
+          valid_script_output?,
+          correct_datum?,
+          correct_value?,
+        }
       }
+
       AddVote(owner_asset_name) -> {
         let can_add_vote_nft =
           context.transaction
@@ -181,6 +203,16 @@ validator(pricing: Pricing) {
         let vote_not_repeated =
           list.find(datum.votes, fn(an) { an == owner_asset_name }) == None
 
+        let valid_script_input =
+          value.quantity_of(
+            owner_script_reference.output.value,
+            policy_id,
+            "valid",
+          ) == 1
+
+        let valid_script_output =
+          value.quantity_of(output.value, policy_id, "valid") == 1
+
         let correct_value =
           value.lovelace_of(output.value) >= value.lovelace_of(
             script_input.output.value,
@@ -196,6 +228,8 @@ validator(pricing: Pricing) {
           can_add_vote_nft?,
           not_voting_himself?,
           correct_owner_reference?,
+          valid_script_input?,
+          valid_script_output?,
           has_right_role?,
           nft_is_listed?,
           vote_not_repeated?,
@@ -239,6 +273,16 @@ validator(pricing: Pricing) {
 
         let output_datum = gift.find_datum(output)
 
+        let valid_script_input =
+          value.quantity_of(
+            owner_script_reference.output.value,
+            policy_id,
+            "valid",
+          ) == 1
+
+        let valid_script_output =
+          value.quantity_of(output.value, policy_id, "valid") == 1
+
         let correct_value =
           value.lovelace_of(output.value) >= value.lovelace_of(
             script_input.output.value,
@@ -253,6 +297,8 @@ validator(pricing: Pricing) {
           has_right_role?,
           nft_is_listed?,
           nft_is_not_approved?,
+          valid_script_input?,
+          valid_script_output?,
           correct_value?,
           correct_datum?,
         }

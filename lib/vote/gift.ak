@@ -189,12 +189,22 @@ pub fn validate_token(
 ) -> Bool {
   let MintData { role, output_reference, asset_name } = mint_data
 
-  let correct_mint =
+  let correct_mint_nft =
     (
       tx.mint
         |> value.from_minted_value
         |> value.quantity_of(policy_id, asset_name)
     ) == 1
+
+  let correct_mint_valid_token =
+    (
+      tx.mint
+        |> value.from_minted_value
+        |> value.quantity_of(policy_id, "valid")
+    ) == 1
+
+  let script_output_valid_nft_present =
+    ( script_output.value |> value.quantity_of(policy_id, "valid") ) == 1
 
   let script_output_lovelace = script_output.value |> value.lovelace_of
 
@@ -219,5 +229,12 @@ pub fn validate_token(
   let mint_correct_token =
     tx |> correct_nft_name_mint(output_reference, asset_name)
 
-  correct_mint? && correct_output_value? && correct_output_datum? && mint_correct_token?
+  and {
+    correct_mint_nft?,
+    correct_mint_valid_token?,
+    script_output_valid_nft_present?,
+    correct_output_value?,
+    correct_output_datum?,
+    mint_correct_token?,
+  }
 }
