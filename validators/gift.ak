@@ -192,7 +192,7 @@ validator(pricing: Pricing) {
           owner_script_reference_datum.asset_name == owner_asset_name
 
         let has_right_role = owner_script_reference_datum.role == Vote
-        let nft_is_listed = datum.is_listed == True
+        let nft_is_approved = datum.is_approved
 
         let output =
           context.transaction.outputs
@@ -231,7 +231,7 @@ validator(pricing: Pricing) {
           valid_script_input?,
           valid_script_output?,
           has_right_role?,
-          nft_is_listed?,
+          nft_is_approved?,
           vote_not_repeated?,
           correct_value?,
           correct_datum?,
