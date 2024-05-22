@@ -17,6 +17,19 @@ pub type MintRedeemer {
   CreateUser { utxo_ref: OutputReference }
 }
 
+pub type Auth {
+  key: Hash<Blake2b_224, VerificationKey>,
+  nft_ref: OutputReference,
+}
+
+pub type SpendRedeemer {
+  AdminModApprove { auth: Auth, positive: Bool, user_nft_ref: OutputReference }
+  AdminRewardDistribute
+  UserModApprove { auth: Auth, positive: Bool, source_nft_ref: OutputReference }
+  UserAddVote { auth: Auth }
+  UserRewardDistribute
+}
+
 pub type CompetitionParams {
   utxo_ref: OutputReference,
   admin_price: Int,
@@ -178,6 +191,31 @@ pub fn find_output_with_address(
 ) -> Output {
   expect [script_output] =
     outputs |> list.filter(fn(out) { out.address == address })
+
+  script_output
+}
+
+pub fn outputs_with_asset(
+  outputs: List<Output>,
+  address: Address,
+  policy_id: PolicyId,
+  asset_name: AssetName,
+) -> List<Output> {
+  outputs
+    |> list.filter(fn(out) { and {
+            out.address == address,
+            value.quantity_of(out.value, policy_id, asset_name) == 1,
+          } })
+}
+
+pub fn find_output_with_asset(
+  outputs: List<Output>,
+  address: Address,
+  policy_id: PolicyId,
+  asset_name: AssetName,
+) -> Output {
+  expect [script_output] =
+    outputs_with_asset(outputs, address, policy_id, asset_name)
 
   script_output
 }
