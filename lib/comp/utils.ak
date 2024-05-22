@@ -2,58 +2,48 @@ use aiken/bytearray
 use aiken/dict
 use aiken/hash.{Blake2b_224, Hash}
 use aiken/list
+use aiken/option
+use aiken/time.{PosixTime}
 use aiken/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction, TransactionId,
 }
 use aiken/transaction/credential.{
   Address, ScriptCredential, VerificationKey, VerificationKeyCredential,
 }
-use aiken/transaction/value.{AssetName, PolicyId}
-
-pub type Role {
-  Admin
-  Moderator
-  Vote
-  User
-}
-
-pub type Pricing {
-  admin: Int,
-  moderator: Int,
-  vote: Int,
-  user: Int,
-}
-
-pub type MintData {
-  role: Role,
-  output_reference: OutputReference,
-  asset_name: AssetName,
-}
+use aiken/transaction/value.{AssetName, MintedValue, PolicyId}
 
 pub type MintRedeemer {
-  MintAction { mints: List<MintData>, index_output_range: (Int, Int) }
-  BurnAction
+  CreateComp
+  CreateUser { utxo_ref: OutputReference }
 }
 
-pub type SpendAction {
-  ListVote
-  AddVote { owner_asset_name: AssetName }
-  Review { owner_asset_name: AssetName, approve: Bool }
-  Unlock
+pub type CompetitionParams {
+  utxo_ref: OutputReference,
+  admin_price: Int,
+  user_price: Int,
+  vote_policy_id: PolicyId,
+  end_date: PosixTime,
+  reward_rates: RewardRates,
 }
 
-pub type SpendRedeemer {
-  owner: Hash<Blake2b_224, VerificationKey>,
-  action: SpendAction,
+pub type WinnerRate {
+  user: Int,
+  vote: Int,
 }
 
-pub type NftStoreDatum {
-  asset_name: AssetName,
-  role: Role,
-  is_listed: Bool,
-  is_approved: Bool,
-  is_rejected: Bool,
-  votes: List<AssetName>,
+pub type RewardRates {
+  admin: Int,
+  moderator: Int,
+  winners: List<WinnerRate>,
+}
+
+pub type Datum {
+  AdminDatum {
+    approved_votes: List<AssetName>,
+    rejected_votes: List<AssetName>,
+  }
+  AwaitDatum { asset_name: AssetName }
+  VoteDatum { asset_name: AssetName, votes: List<AssetName> }
 }
 
 pub fn address_from_policy_id(policy_id: PolicyId) -> Address {
@@ -68,10 +58,39 @@ pub fn policy_id_from_address(address: Address) -> PolicyId {
   script_hash
 }
 
-pub fn find_datum(script_output: Output) -> NftStoreDatum {
+pub fn find_datum(script_output: Output) -> Datum {
   expect InlineDatum(datum_raw) = script_output.datum
-  expect datum: NftStoreDatum = datum_raw
+  expect datum: Datum = datum_raw
   datum
+}
+
+pub fn minted_right_nfts(
+  mint: MintedValue,
+  policy_id: PolicyId,
+  expected_asset_names: List<AssetName>,
+) -> Bool {
+  let (minted_assets, minted_amounts) =
+    mint
+      |> value.from_minted_value
+      |> value.tokens(policy_id)
+      |> dict.to_list
+      |> list.unzip
+
+  let correct_names =
+    list.sort(minted_assets, bytearray.compare) == list.sort(
+      expected_asset_names,
+      bytearray.compare,
+    )
+
+  let correct_amounts = list.all(minted_amounts, fn(an) { an == 1 })
+
+  correct_names? && correct_amounts?
+}
+
+pub fn unique_nft_name(out_ref: OutputReference) {
+  out_ref.transaction_id.hash
+    |> bytearray.slice(0, 30)
+    |> bytearray.push(out_ref.output_index)
 }
 
 pub fn permission_redeem_nft(
@@ -105,31 +124,13 @@ pub fn permission_redeem_nft(
   nft_present_in_reference && signed_by_owner
 }
 
-pub fn correct_nft_name_mint(
-  tx: Transaction,
-  output_reference: OutputReference,
-  assert_asset_name: AssetName,
-) {
-  let output_reference_index_one_byte = output_reference.output_index < 256
+pub fn utxo_ref_present(tx: Transaction, utxo_ref: OutputReference) {
+  let utxo_ref_index_one_byte = utxo_ref.output_index < 256
 
-  let output_reference_present_input =
-    when tx.inputs |> transaction.find_input(output_reference) is {
-      Some(_) -> True
-      _ -> False
-    }
+  let utxo_ref_present_input =
+    tx.inputs |> transaction.find_input(utxo_ref) |> option.is_some()
 
-  let expected_asset_name =
-    output_reference.transaction_id.hash
-      |> bytearray.slice(0, 30)
-      |> bytearray.push(output_reference.output_index)
-
-  let correct_asset_name = expected_asset_name == assert_asset_name
-
-  and {
-    output_reference_index_one_byte,
-    output_reference_present_input,
-    correct_asset_name,
-  }
+  utxo_ref_index_one_byte? && utxo_ref_present_input?
 }
 
 pub fn unique_token_minted(
@@ -179,57 +180,4 @@ pub fn find_output_with_address(
     outputs |> list.filter(fn(out) { out.address == address })
 
   script_output
-}
-
-pub fn validate_token(
-  pricing: Pricing,
-  tx: Transaction,
-  policy_id: PolicyId,
-  mint_data: MintData,
-  script_output: Output,
-) -> Bool {
-  let MintData { role, output_reference, asset_name } = mint_data
-
-  let correct_mint_nft =
-    (
-      tx.mint
-        |> value.from_minted_value
-        |> value.quantity_of(policy_id, asset_name)
-    ) == 1
-
-  let script_output_valid_nft_present =
-    value.quantity_of(script_output.value, policy_id, "valid") == 1
-
-  let script_output_lovelace = value.lovelace_of(script_output.value)
-
-  let correct_output_value =
-    script_output_lovelace >= when role is {
-      Admin -> pricing.admin
-      Moderator -> pricing.moderator
-      Vote -> pricing.vote
-      User -> pricing.user
-    }
-
-  let datum = find_datum(script_output)
-
-  let correct_output_datum =
-    datum == NftStoreDatum {
-      role,
-      votes: [],
-      is_listed: False,
-      is_approved: False,
-      is_rejected: False,
-      asset_name,
-    }
-
-  let mint_correct_token =
-    tx |> correct_nft_name_mint(output_reference, asset_name)
-
-  and {
-    correct_mint_nft?,
-    script_output_valid_nft_present?,
-    correct_output_value?,
-    correct_output_datum?,
-    mint_correct_token?,
-  }
 }

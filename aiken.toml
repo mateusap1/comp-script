@@ -1,11 +1,11 @@
-name = "mateusap1/vote"
+name = "mateusap1/comp"
 version = "0.0.0"
 license = "Apache-2.0"
-description = "Aiken contracts for project 'mateusap1/vote'"
+description = "Aiken contracts for project 'mateusap1/comp'"
 
 [repository]
 user = "mateusap1"
-project = "vote"
+project = "comp"
 platform = "github"
 
 [[dependencies]]
