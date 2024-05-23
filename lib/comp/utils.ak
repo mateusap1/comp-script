@@ -5,12 +5,12 @@ use aiken/list
 use aiken/option
 use aiken/time.{PosixTime}
 use aiken/transaction.{
-  InlineDatum, Input, Output, OutputReference, Transaction, TransactionId,
+  Datum, InlineDatum, Input, Output, OutputReference, Transaction, TransactionId,
 }
 use aiken/transaction/credential.{
   Address, ScriptCredential, VerificationKey, VerificationKeyCredential,
 }
-use aiken/transaction/value.{AssetName, MintedValue, PolicyId}
+use aiken/transaction/value.{AssetName, MintedValue, PolicyId, Value}
 
 pub type MintRedeemer {
   CreateComp
@@ -23,11 +23,9 @@ pub type Auth {
 }
 
 pub type SpendRedeemer {
-  AdminModApprove { auth: Auth, positive: Bool, user_nft_ref: OutputReference }
-  AdminRewardDistribute
-  UserModApprove { auth: Auth, positive: Bool, source_nft_ref: OutputReference }
-  UserAddVote { auth: Auth }
-  UserRewardDistribute
+  ModApprove { auth: Auth, is_approve: Bool }
+  AddVote { auth: Auth, vote_asset_name: AssetName }
+  RewardDistribute
 }
 
 pub type CompetitionParams {
@@ -50,7 +48,7 @@ pub type RewardRates {
   winners: List<WinnerRate>,
 }
 
-pub type Datum {
+pub type ScriptDatum {
   AdminDatum {
     approved_votes: List<AssetName>,
     rejected_votes: List<AssetName>,
@@ -71,10 +69,14 @@ pub fn policy_id_from_address(address: Address) -> PolicyId {
   script_hash
 }
 
-pub fn find_datum(script_output: Output) -> Datum {
-  expect InlineDatum(datum_raw) = script_output.datum
-  expect datum: Datum = datum_raw
+pub fn find_datum(datum: Datum) -> ScriptDatum {
+  expect InlineDatum(datum_raw) = datum
+  expect datum: ScriptDatum = datum_raw
   datum
+}
+
+pub fn lovelace_geq(value_geq: Value, value_less: Value) {
+  value.lovelace_of(value_geq) >= value.lovelace_of(value_less)
 }
 
 pub fn minted_right_nfts(
@@ -106,35 +108,20 @@ pub fn unique_nft_name(out_ref: OutputReference) {
     |> bytearray.push(out_ref.output_index)
 }
 
-pub fn permission_redeem_nft(
+pub fn nft_authenticated(
   tx: Transaction,
-  redeem_policy_id: PolicyId,
-  redeem_nft: AssetName,
-  owner: Hash<Blake2b_224, VerificationKey>,
+  auth: Auth,
+  policy_id: PolicyId,
+  redeem_name: AssetName,
 ) -> Bool {
-  // Find reference input from the supposed owner of the redeemer NFT
-  expect Some(ref_from_owner) =
-    tx.reference_inputs
-      |> list.find(
-          fn(input) {
-            when input.output.address.payment_credential is {
-              VerificationKeyCredential(credential) -> credential == owner
-              _ -> False
-            }
-          },
-        )
+  let Auth { key, nft_ref } = auth
 
-  // Assert that the redeem NFT is present in the reference UTxO
-  let nft_present_in_reference =
-    (
-      ref_from_owner.output.value
-        |> value.quantity_of(redeem_policy_id, redeem_nft)
-    ) == 1
+  expect Some(auth_input) = transaction.find_input(tx.reference_inputs, nft_ref)
 
-  // Make sure the owner of the redeem NFT actually signed this transaction
-  let signed_by_owner = tx.extra_signatories |> list.has(owner)
-
-  nft_present_in_reference && signed_by_owner
+  and {
+    value.quantity_of(auth_input.output.value, policy_id, redeem_name) == 1,
+    list.has(tx.extra_signatories, key),
+  }
 }
 
 pub fn utxo_ref_present(tx: Transaction, utxo_ref: OutputReference) {
@@ -193,6 +180,31 @@ pub fn find_output_with_address(
     outputs |> list.filter(fn(out) { out.address == address })
 
   script_output
+}
+
+pub fn inputs_with_asset(
+  inputs: List<Input>,
+  address: Address,
+  policy_id: PolicyId,
+  asset_name: AssetName,
+) -> List<Input> {
+  inputs
+    |> list.filter(fn(inp) { and {
+            inp.output.address == address,
+            value.quantity_of(inp.output.value, policy_id, asset_name) == 1,
+          } })
+}
+
+pub fn find_input_with_asset(
+  inputs: List<Input>,
+  address: Address,
+  policy_id: PolicyId,
+  asset_name: AssetName,
+) -> Input {
+  expect [script_input] =
+    inputs_with_asset(inputs, address, policy_id, asset_name)
+
+  script_input
 }
 
 pub fn outputs_with_asset(

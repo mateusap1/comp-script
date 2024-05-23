@@ -2,13 +2,14 @@ use aiken/bytearray
 use aiken/dict
 use aiken/list
 use aiken/option
-use aiken/transaction.{Mint, OutputReference, ScriptContext, Spend, Transaction}
+use aiken/transaction.{
+  Mint, Output, OutputReference, ScriptContext, Spend, Transaction,
+}
 use aiken/transaction/credential.{ScriptCredential}
 use aiken/transaction/value
 use comp/utils.{
-  AdminDatum, AdminModApprove, Auth, AwaitDatum, CompetitionParams, CreateComp,
-  CreateUser, Datum, MintRedeemer, SpendRedeemer, UserAddVote, UserModApprove,
-  VoteDatum,
+  AddVote, AdminDatum, Auth, AwaitDatum, CompetitionParams, CreateComp,
+  CreateUser, MintRedeemer, ModApprove, ScriptDatum, SpendRedeemer, VoteDatum,
 }
 
 validator(params: CompetitionParams) {
@@ -24,21 +25,21 @@ validator(params: CompetitionParams) {
     // This enforces that there is one unique script output
     let output = utils.find_output_with_address(outputs, script_address)
 
-    let output_datum = utils.find_datum(output)
+    let output_datum = utils.find_datum(output.datum)
 
     when redeemer is {
       CreateComp -> {
-        // Must mint "source", "admin" and "mod"
-        // Source must go to our own address
+        // Must mint "admin", "admin" and "mod"
+        // admin must go to our own address
         let minted_right_nfts =
           utils.minted_right_nfts(
             mint,
             policy_id,
-            ["admin", "mod", "source-machine"],
+            ["admin", "mod", "admin-machine"],
           )
 
-        let output_has_source =
-          value.quantity_of(output.value, policy_id, "source-machine") == 1
+        let output_has_admin =
+          value.quantity_of(output.value, policy_id, "admin-machine") == 1
 
         let output_has_price = value.lovelace_of(output.value) >= admin_price
 
@@ -56,7 +57,7 @@ validator(params: CompetitionParams) {
 
         and {
           minted_right_nfts?,
-          output_has_source?,
+          output_has_admin?,
           output_has_price?,
           output_has_right_datum?,
           utxo_ref_present?,
@@ -74,7 +75,7 @@ validator(params: CompetitionParams) {
         let utxo_ref_present_input =
           utils.utxo_ref_present(context.transaction, utxo_ref_user)
 
-        let output_has_source =
+        let output_has_admin =
           value.quantity_of(output.value, policy_id, "user-machine") == 1
 
         let output_has_price = value.lovelace_of(output.value) >= user_price
@@ -86,7 +87,7 @@ validator(params: CompetitionParams) {
         and {
           minted_right_nfts?,
           utxo_ref_present_input?,
-          output_has_source?,
+          output_has_admin?,
           output_has_price?,
           output_has_right_datum?,
         }
@@ -96,198 +97,216 @@ validator(params: CompetitionParams) {
 
   fn spend(
     redeemer: SpendRedeemer,
-    input_datum: Datum,
+    input_datum: ScriptDatum,
     context: ScriptContext,
   ) -> Bool {
     expect Spend(input_ref) = context.purpose
 
-    let CompetitionParams { admin_price, user_price, .. } = params
-
-    let Transaction { inputs, reference_inputs, outputs, extra_signatories, .. } =
-      context.transaction
+    let Transaction {
+      inputs,
+      reference_inputs,
+      outputs,
+      extra_signatories,
+      mint,
+      ..
+    } = context.transaction
 
     expect Some(input) = transaction.find_input(inputs, input_ref)
-
     let address = input.output.address
-    let policy_id = utils.policy_id_from_address(address)
 
-    when redeemer is {
-      AdminModApprove { auth, positive, user_nft_ref } -> {
-        let output =
-          utils.find_output_with_asset(
-            outputs,
-            address,
-            policy_id,
-            "source-machine",
-          )
-        let output_datum = utils.find_datum(output)
+    expect Some(first_input) =
+      list.find(inputs, fn(inp) { inp.output.address == address })
 
-        // Check the auth
-        let Auth { key, nft_ref } = auth
+    let is_first_input = first_input == input
 
-        expect Some(auth_input) =
-          transaction.find_input(reference_inputs, nft_ref)
+    if !is_first_input {
+      // If it is the first script of the inputs, execute, otherwise return true
 
-        let mod_authenticated = and {
-            value.quantity_of(auth_input.output.value, policy_id, "mod") == 1,
-            list.has(extra_signatories, key),
-          }
+      True
+    } else {
+      let policy_id = utils.policy_id_from_address(address)
 
-        // Make sure user is valid
-        expect Some(user_input) = transaction.find_input(inputs, user_nft_ref)
+      when redeemer is {
+        ModApprove { auth, is_approve } -> {
+          // The following is so we know that we have a unique admin
+          // script input and a unique admin script output
+          // Also that their datum is AdminDatum
+          let admin_input =
+            utils.find_input_with_asset(
+              inputs,
+              address,
+              policy_id,
+              "admin-machine",
+            )
+          let admin_input_datum = utils.find_datum(admin_input.output.datum)
+          expect AdminDatum {
+            approved_votes: admin_input_app,
+            rejected_votes: admin_input_rej,
+          } = admin_input_datum
 
-        let user_datum = utils.find_datum(user_input.output)
-        expect AwaitDatum(user_asset_name) = user_datum
+          let admin_output =
+            utils.find_output_with_asset(
+              outputs,
+              address,
+              policy_id,
+              "admin-machine",
+            )
+          let admin_output_datum = utils.find_datum(admin_output.datum)
+          expect AdminDatum {
+            approved_votes: admin_output_app,
+            rejected_votes: admin_output_rej,
+          } = admin_output_datum
 
-        let valid_user =
-          value.quantity_of(user_input.output.value, policy_id, "user-machine") == 1
+          // Let's get the user information now
+          let user_input =
+            utils.find_input_with_asset(
+              inputs,
+              address,
+              policy_id,
+              "user-machine",
+            )
+          let user_input_datum = utils.find_datum(user_input.output.datum)
+          expect AwaitDatum(user_input_asset_name) = user_input_datum
 
-        let right_output_lovelace =
-          value.lovelace_of(output.value) >= value.lovelace_of(
-            input.output.value,
-          )
-
-        expect AdminDatum {
-          approved_votes: inp_app_votes,
-          rejected_votes: inp_rej_votes,
-        } = input_datum
-
-        expect AdminDatum {
-          approved_votes: out_app_votes,
-          rejected_votes: out_rej_votes,
-        } = output_datum
-
-        let right_output_datum =
-          if positive {
-            and {
-              out_app_votes == [user_asset_name, ..inp_app_votes],
-              out_rej_votes == inp_rej_votes,
-            }
-          } else {
-            and {
-              out_app_votes == inp_app_votes,
-              out_rej_votes == [user_asset_name, ..inp_rej_votes],
-            }
-          }
-
-        and {
-          mod_authenticated?,
-          valid_user?,
-          right_output_lovelace?,
-          right_output_datum?,
-        }
-      }
-      UserModApprove { auth, positive, source_nft_ref } -> {
-        // Check the auth
-        let Auth { key, nft_ref } = auth
-
-        expect Some(auth_input) =
-          transaction.find_input(reference_inputs, nft_ref)
-
-        let mod_authenticated = and {
-            value.quantity_of(auth_input.output.value, policy_id, "mod") == 1,
-            list.has(extra_signatories, key),
-          }
-
-        // Make sure source is valid
-        expect Some(source_input) =
-          transaction.find_input(inputs, source_nft_ref)
-
-        let valid_source =
-          value.quantity_of(
-            source_input.output.value,
-            policy_id,
-            "source-machine",
-          ) == 1
-
-        let right_output =
-          if positive {
-            let output =
-              utils.find_output_with_asset(
-                outputs,
-                address,
-                policy_id,
-                "user-machine",
-              )
-            let output_datum = utils.find_datum(output)
-
-            expect AwaitDatum { asset_name: inp_an } = input_datum
-            expect VoteDatum { asset_name: out_an, votes: out_votes } =
-              output_datum
-
-            and {
-              value.lovelace_of(output.value) >= value.lovelace_of(
-                input.output.value,
-              ),
-              out_an == inp_an,
-              out_votes == [],
-            }
-          } else {
+          let user_outputs =
             utils.outputs_with_asset(
               outputs,
               address,
               policy_id,
               "user-machine",
-            ) == []
+            )
+
+          let admin_input_value = admin_input.output.value
+          let admin_output_value = admin_output.value
+
+          let right_admin_value =
+            utils.lovelace_geq(admin_input_value, admin_output_value)
+
+          let expected_app_votes =
+            if is_approve {
+              [user_input_asset_name, ..admin_input_app]
+            } else {
+              admin_input_app
+            }
+          let expected_rej_votes =
+            if is_approve {
+              admin_input_rej
+            } else {
+              [user_input_asset_name, ..admin_input_rej]
+            }
+
+          let right_admin_datum = and {
+              admin_output_app == expected_app_votes,
+              admin_output_rej == expected_rej_votes,
+            }
+
+          let mod_authenticated =
+            context.transaction
+              |> utils.nft_authenticated(auth, policy_id, "mod")
+
+          let right_user_value =
+            when user_outputs is {
+              [Output { value: user_output_value, .. }] ->
+                is_approve && utils.lovelace_geq(
+                  user_output_value,
+                  user_input.output.value,
+                )
+              [] -> {
+                // user-machine must be burnt
+                expect [(an, -1)] =
+                  mint
+                    |> value.from_minted_value
+                    |> value.tokens(policy_id)
+                    |> dict.to_list
+
+                !is_approve && an == "user-machine"
+              }
+              _ -> False
+            }
+
+          let right_user_datum =
+            when user_outputs is {
+              [Output { datum, .. }] -> {
+                let user_output_datum = utils.find_datum(datum)
+                expect VoteDatum { asset_name, votes } = user_output_datum
+                is_approve && asset_name == user_input_asset_name && votes == []
+              }
+              [] -> !is_approve
+              _ -> False
+            }
+
+          and {
+            right_admin_value?,
+            right_admin_datum?,
+            mod_authenticated?,
+            right_user_value?,
+            right_user_datum,
           }
-        and {
-          mod_authenticated?,
-          valid_source?,
-          right_output?,
         }
-      }
-      UserAddVote(auth) -> {
-        // Check the auth
-        let Auth { key, nft_ref } = auth
+        AddVote(auth, vote_asset_name) -> {
+          let user_input =
+            utils.find_input_with_asset(
+              inputs,
+              address,
+              policy_id,
+              "user-machine",
+            )
+          let user_input_datum = utils.find_datum(user_input.output.datum)
+          expect VoteDatum {
+            asset_name: user_input_asset_name,
+            votes: user_input_votes,
+          } = user_input_datum
 
-        expect Some(auth_input) =
-          transaction.find_input(reference_inputs, nft_ref)
+          let user_output =
+            utils.find_output_with_asset(
+              outputs,
+              address,
+              policy_id,
+              "user-machine",
+            )
+          let user_output_datum = utils.find_datum(user_output.datum)
+          expect VoteDatum {
+            asset_name: user_output_asset_name,
+            votes: user_output_votes,
+          } = user_output_datum
 
-        let votes =
-          auth_input.output.value
-            |> value.tokens(policy_id)
+          let right_user_value =
+            utils.lovelace_geq(user_output.value, user_input.output.value)
 
-        let vote_assets = votes |> dict.keys
+          let right_user_datum = and {
+              user_output_asset_name == user_input_asset_name,
+              user_output_votes == [vote_asset_name, ..user_input_votes],
+            }
 
-        let vote_power =
-          votes
-            |> dict.values
-            |> list.length
+          let vote_not_repeated =
+            user_input_votes
+              |> list.find(fn(an) { an == vote_asset_name })
+              |> option.is_none()
 
-        let vote_authenticated = and {
-            vote_power > 0,
-            list.has(extra_signatories, key),
+          let vote_authenticated =
+            context.transaction
+              |> utils.nft_authenticated(
+                  auth,
+                  params.vote_policy_id,
+                  vote_asset_name,
+                )
+          let unique_script_input =
+            (
+              inputs
+                |> list.filter(fn(inp) { inp.output.address == address })
+                |> list.length
+            ) == 1
+
+          and {
+            right_user_value?,
+            right_user_datum?,
+            vote_not_repeated?,
+            vote_authenticated?,
+            unique_script_input?,
           }
-
-        let output =
-          utils.find_output_with_asset(
-            outputs,
-            address,
-            policy_id,
-            "user-machine",
-          )
-        let valid_lovelace =
-          value.lovelace_of(output.value) >= value.lovelace_of(
-            input.output.value,
-          )
-
-        let output_datum = utils.find_datum(output)
-
-        expect VoteDatum { asset_name: inp_an, votes: inp_votes } = input_datum
-        expect VoteDatum { asset_name: out_an, votes: out_votes } = output_datum
-
-        let valid_datum = and {
-            inp_an == out_an,
-            out_votes == list.concat(vote_assets, inp_votes),
-          }
-
-        and {
-          vote_authenticated?,
-          valid_lovelace?,
-          valid_datum?,
         }
+        _ -> False
       }
-      _ -> False
     }
   }
 }
