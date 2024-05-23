@@ -1,17 +1,13 @@
-use aiken/bytearray
 use aiken/dict
 use aiken/interval
 use aiken/list
 use aiken/option
-use aiken/transaction.{
-  Mint, Output, OutputReference, ScriptContext, Spend, Transaction,
-}
-use aiken/transaction/credential.{ScriptCredential}
+use aiken/transaction.{Mint, Output, ScriptContext, Spend, Transaction}
+use aiken/transaction/credential
 use aiken/transaction/value
 use comp/utils.{
-  AddVote, Auth, CollectRewards, CompetitionParams, CreateComp, CreateUser,
-  CurationDatum, MintRedeemer, ModApprove, ReviewDatum, ScriptDatum,
-  SpendRedeemer, VoteDatum,
+  AddVote, CompetitionParams, CreateComp, CreateUser, CurationDatum,
+  MintRedeemer, ModApprove, ReviewDatum, ScriptDatum, SpendRedeemer, VoteDatum,
 }
 
 validator(params: CompetitionParams) {
@@ -314,34 +310,7 @@ validator(params: CompetitionParams) {
             unique_script_input?,
           }
         }
-        CollectRewards -> {
-          let admin_input =
-            utils.find_input_with_asset(
-              inputs,
-              address,
-              policy_id,
-              "admin-machine",
-            )
-          let admin_input_datum = utils.find_datum(admin_input.output.datum)
-          expect CurationDatum { approved_votes, .. } = admin_input_datum
-
-          let expected_users = list.length(approved_votes)
-          let total_funds = params.user_price * list.length(approved_votes)
-
-          let end_date_has_passed =
-            interval.is_entirely_after(validity_range, params.end_date)
-
-          and {
-            end_date_has_passed?,
-            every_user_input_present?,
-            admin_received_right_reward?,
-            mod_received_right_reward?,
-            user_winners_received_right_reward?,
-            vote_winners_received_right_reward?,
-            scripts_dissapeared?,
-            tokens_burnt?,
-          }
-        }
+        _ -> False
       }
     }
   }
