@@ -7,9 +7,7 @@ use aiken/time.{PosixTime}
 use aiken/transaction.{
   Datum, InlineDatum, Input, Output, OutputReference, Transaction, TransactionId,
 }
-use aiken/transaction/credential.{
-  Address, ScriptCredential, VerificationKey, VerificationKeyCredential,
-}
+use aiken/transaction/credential.{Address, ScriptCredential, VerificationKey}
 use aiken/transaction/value.{AssetName, MintedValue, PolicyId, Value}
 
 pub type MintRedeemer {
@@ -22,10 +20,16 @@ pub type Auth {
   nft_ref: OutputReference,
 }
 
+pub type ClaimRole {
+  User
+  Voter
+}
+
 pub type SpendRedeemer {
   ModApprove { auth: Auth, is_approve: Bool }
   AddVote { auth: Auth, vote_asset_name: AssetName }
-  RewardDistribute
+  CollectRewards
+  ClaimRewards { asset_name: AssetName, role: ClaimRole }
 }
 
 pub type CompetitionParams {
@@ -49,11 +53,15 @@ pub type RewardRates {
 }
 
 pub type ScriptDatum {
-  AdminDatum {
+  CurationDatum {
     approved_votes: List<AssetName>,
     rejected_votes: List<AssetName>,
   }
-  AwaitDatum { asset_name: AssetName }
+  RewardsDatum {
+    user_rewards: List<(AssetName, Int)>,
+    vote_rewards: List<(AssetName, Int)>,
+  }
+  ReviewDatum { asset_name: AssetName }
   VoteDatum { asset_name: AssetName, votes: List<AssetName> }
 }
 

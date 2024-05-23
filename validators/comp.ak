@@ -1,5 +1,6 @@
 use aiken/bytearray
 use aiken/dict
+use aiken/interval
 use aiken/list
 use aiken/option
 use aiken/transaction.{
@@ -8,8 +9,9 @@ use aiken/transaction.{
 use aiken/transaction/credential.{ScriptCredential}
 use aiken/transaction/value
 use comp/utils.{
-  AddVote, AdminDatum, Auth, AwaitDatum, CompetitionParams, CreateComp,
-  CreateUser, MintRedeemer, ModApprove, ScriptDatum, SpendRedeemer, VoteDatum,
+  AddVote, Auth, CollectRewards, CompetitionParams, CreateComp, CreateUser,
+  CurationDatum, MintRedeemer, ModApprove, ReviewDatum, ScriptDatum,
+  SpendRedeemer, VoteDatum,
 }
 
 validator(params: CompetitionParams) {
@@ -20,7 +22,8 @@ validator(params: CompetitionParams) {
 
     let CompetitionParams { admin_price, user_price, utxo_ref, .. } = params
 
-    let Transaction { inputs, outputs, mint, .. } = context.transaction
+    let Transaction { inputs, outputs, mint, validity_range, .. } =
+      context.transaction
 
     // This enforces that there is one unique script output
     let output = utils.find_output_with_address(outputs, script_address)
@@ -43,7 +46,7 @@ validator(params: CompetitionParams) {
 
         let output_has_price = value.lovelace_of(output.value) >= admin_price
 
-        expect AdminDatum { approved_votes, rejected_votes } = output_datum
+        expect CurationDatum { approved_votes, rejected_votes } = output_datum
 
         let output_has_right_datum = and {
             approved_votes == [],
@@ -64,6 +67,9 @@ validator(params: CompetitionParams) {
         }
       }
       CreateUser(utxo_ref_user) -> {
+        let before_end_date =
+          interval.is_entirely_before(validity_range, params.end_date)
+
         let user_asset_name = utils.unique_nft_name(utxo_ref_user)
 
         let minted_right_nfts =
@@ -80,11 +86,12 @@ validator(params: CompetitionParams) {
 
         let output_has_price = value.lovelace_of(output.value) >= user_price
 
-        expect AwaitDatum { asset_name } = output_datum
+        expect ReviewDatum { asset_name } = output_datum
 
         let output_has_right_datum = asset_name == user_asset_name
 
         and {
+          before_end_date?,
           minted_right_nfts?,
           utxo_ref_present_input?,
           output_has_admin?,
@@ -97,19 +104,13 @@ validator(params: CompetitionParams) {
 
   fn spend(
     redeemer: SpendRedeemer,
-    input_datum: ScriptDatum,
+    _dat: ScriptDatum,
     context: ScriptContext,
   ) -> Bool {
     expect Spend(input_ref) = context.purpose
 
-    let Transaction {
-      inputs,
-      reference_inputs,
-      outputs,
-      extra_signatories,
-      mint,
-      ..
-    } = context.transaction
+    let Transaction { inputs, outputs, mint, validity_range, .. } =
+      context.transaction
 
     expect Some(input) = transaction.find_input(inputs, input_ref)
     let address = input.output.address
@@ -130,7 +131,7 @@ validator(params: CompetitionParams) {
         ModApprove { auth, is_approve } -> {
           // The following is so we know that we have a unique admin
           // script input and a unique admin script output
-          // Also that their datum is AdminDatum
+          // Also that their datum is CurationDatum
           let admin_input =
             utils.find_input_with_asset(
               inputs,
@@ -139,7 +140,7 @@ validator(params: CompetitionParams) {
               "admin-machine",
             )
           let admin_input_datum = utils.find_datum(admin_input.output.datum)
-          expect AdminDatum {
+          expect CurationDatum {
             approved_votes: admin_input_app,
             rejected_votes: admin_input_rej,
           } = admin_input_datum
@@ -152,7 +153,7 @@ validator(params: CompetitionParams) {
               "admin-machine",
             )
           let admin_output_datum = utils.find_datum(admin_output.datum)
-          expect AdminDatum {
+          expect CurationDatum {
             approved_votes: admin_output_app,
             rejected_votes: admin_output_rej,
           } = admin_output_datum
@@ -166,7 +167,7 @@ validator(params: CompetitionParams) {
               "user-machine",
             )
           let user_input_datum = utils.find_datum(user_input.output.datum)
-          expect AwaitDatum(user_input_asset_name) = user_input_datum
+          expect ReviewDatum(user_input_asset_name) = user_input_datum
 
           let user_outputs =
             utils.outputs_with_asset(
@@ -175,6 +176,9 @@ validator(params: CompetitionParams) {
               policy_id,
               "user-machine",
             )
+
+          let before_end_date =
+            interval.is_entirely_before(validity_range, params.end_date)
 
           let admin_input_value = admin_input.output.value
           let admin_output_value = admin_output.value
@@ -236,6 +240,7 @@ validator(params: CompetitionParams) {
             }
 
           and {
+            before_end_date?,
             right_admin_value?,
             right_admin_datum?,
             mod_authenticated?,
@@ -270,6 +275,9 @@ validator(params: CompetitionParams) {
             votes: user_output_votes,
           } = user_output_datum
 
+          let before_end_date =
+            interval.is_entirely_before(validity_range, params.end_date)
+
           let right_user_value =
             utils.lovelace_geq(user_output.value, user_input.output.value)
 
@@ -298,6 +306,7 @@ validator(params: CompetitionParams) {
             ) == 1
 
           and {
+            before_end_date?,
             right_user_value?,
             right_user_datum?,
             vote_not_repeated?,
@@ -305,7 +314,34 @@ validator(params: CompetitionParams) {
             unique_script_input?,
           }
         }
-        _ -> False
+        CollectRewards -> {
+          let admin_input =
+            utils.find_input_with_asset(
+              inputs,
+              address,
+              policy_id,
+              "admin-machine",
+            )
+          let admin_input_datum = utils.find_datum(admin_input.output.datum)
+          expect CurationDatum { approved_votes, .. } = admin_input_datum
+
+          let expected_users = list.length(approved_votes)
+          let total_funds = params.user_price * list.length(approved_votes)
+
+          let end_date_has_passed =
+            interval.is_entirely_after(validity_range, params.end_date)
+
+          and {
+            end_date_has_passed?,
+            every_user_input_present?,
+            admin_received_right_reward?,
+            mod_received_right_reward?,
+            user_winners_received_right_reward?,
+            vote_winners_received_right_reward?,
+            scripts_dissapeared?,
+            tokens_burnt?,
+          }
+        }
       }
     }
   }
