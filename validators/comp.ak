@@ -127,8 +127,8 @@ validator(params: CompetitionParams) {
   }
 
   fn spend(
-    redeemer: SpendRedeemer,
     _dat: ScriptDatum,
+    redeemer: SpendRedeemer,
     context: ScriptContext,
   ) -> Bool {
     expect Spend(input_ref) = context.purpose
