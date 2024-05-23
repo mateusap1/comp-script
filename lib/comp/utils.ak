@@ -12,7 +12,7 @@ use aiken/transaction/value.{AssetName, MintedValue, PolicyId, Value}
 
 pub type MintRedeemer {
   CreateComp
-  CreateUser { utxo_ref: OutputReference }
+  CreateUser { utxo_refs: List<OutputReference> }
 }
 
 pub type Auth {

@@ -62,37 +62,65 @@ validator(params: CompetitionParams) {
           utxo_ref_present?,
         }
       }
-      CreateUser(utxo_ref_user) -> {
+      CreateUser(utxo_refs_user) -> {
         let before_end_date =
           interval.is_entirely_before(validity_range, params.end_date)
 
-        let user_asset_name = utils.unique_nft_name(utxo_ref_user)
+        let out_refs_geq_one = list.length(utxo_refs_user) >= 1
+
+        let unique_asset_names =
+          utxo_refs_user
+            |> list.map(fn(utxo_ref) { utils.unique_nft_name(utxo_ref) })
+
+        let user_machines = list.map(utxo_refs_user, fn(_) { "user-machine" })
 
         let minted_right_nfts =
           utils.minted_right_nfts(
             mint,
             policy_id,
-            [user_asset_name, "user-machine"],
+            list.concat(unique_asset_names, user_machines),
           )
-        let utxo_ref_present_input =
-          utils.utxo_ref_present(context.transaction, utxo_ref_user)
 
-        let output_has_admin =
-          value.quantity_of(output.value, policy_id, "user-machine") == 1
+        let user_inputs =
+          list.foldr(
+            inputs,
+            [],
+            fn(inp, acc) {
+              if list.has(utxo_refs_user, inp.output_reference) {
+                [inp, ..acc]
+              } else {
+                acc
+              }
+            },
+          )
 
-        let output_has_price = value.lovelace_of(output.value) >= user_price
+        let utxo_refs_present_input =
+          list.length(user_inputs) == list.length(utxo_refs_user)
 
-        expect ReviewDatum { asset_name } = output_datum
+        let right_user_values = list.all(user_inputs, fn(inp) { and {
+                value.lovelace_of(inp.output.value) >= user_price,
+                value.quantity_of(inp.output.value, policy_id, "user-machine") == 1,
+              } })
 
-        let output_has_right_datum = asset_name == user_asset_name
+        let right_user_datums =
+          list.all(
+            user_inputs,
+            fn(inp) {
+              let expected_asset_name =
+                utils.unique_nft_name(inp.output_reference)
+              let datum = utils.find_datum(inp.output.datum)
+              expect ReviewDatum { asset_name } = datum
+              asset_name == expected_asset_name
+            },
+          )
 
         and {
           before_end_date?,
+          out_refs_geq_one?,
           minted_right_nfts?,
-          utxo_ref_present_input?,
-          output_has_admin?,
-          output_has_price?,
-          output_has_right_datum?,
+          utxo_refs_present_input?,
+          right_user_values?,
+          right_user_datums?,
         }
       }
     }
