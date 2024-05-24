@@ -1,3 +1,4 @@
+use aiken/bytearray
 use aiken/dict
 use aiken/interval
 use aiken/list
@@ -21,13 +22,13 @@ validator(params: CompetitionParams) {
     let Transaction { inputs, outputs, mint, validity_range, .. } =
       context.transaction
 
-    // This enforces that there is one unique script output
-    let output = utils.find_output_with_address(outputs, script_address)
-
-    let output_datum = utils.find_datum(output.datum)
-
     when redeemer is {
       CreateComp -> {
+        // This enforces that there is one unique script output
+        let output = utils.find_output_with_address(outputs, script_address)
+
+        let output_datum = utils.find_datum(output.datum)
+
         // Must mint "admin", "admin" and "mod"
         // admin must go to our own address
         let minted_right_nfts =
@@ -81,7 +82,7 @@ validator(params: CompetitionParams) {
             list.concat(unique_asset_names, user_machines),
           )
 
-        let user_inputs =
+        let proof_inputs =
           list.foldr(
             inputs,
             [],
@@ -95,23 +96,32 @@ validator(params: CompetitionParams) {
           )
 
         let utxo_refs_present_input =
-          list.length(user_inputs) == list.length(utxo_refs_user)
+          list.length(proof_inputs) == list.length(utxo_refs_user)
 
-        let right_user_values = list.all(user_inputs, fn(inp) { and {
-                value.lovelace_of(inp.output.value) >= user_price,
-                value.quantity_of(inp.output.value, policy_id, "user-machine") == 1,
+        let user_outputs =
+          list.filter(outputs, fn(out) { out.address == script_address })
+
+        let right_user_outputs =
+          list.length(user_outputs) == list.length(utxo_refs_user)
+
+        let right_user_values = list.all(user_outputs, fn(out) { and {
+                value.lovelace_of(out.value) >= user_price,
+                value.quantity_of(out.value, policy_id, "user-machine") == 1,
               } })
 
-        let right_user_datums =
-          list.all(
-            user_inputs,
-            fn(inp) {
-              let expected_asset_name =
-                utils.unique_nft_name(inp.output_reference)
-              let datum = utils.find_datum(inp.output.datum)
+        let output_asset_names =
+          list.map(
+            user_outputs,
+            fn(out) {
+              let datum = utils.find_datum(out.datum)
               expect ReviewDatum { asset_name } = datum
-              asset_name == expected_asset_name
+              asset_name
             },
+          )
+        let right_user_datums =
+          list.sort(unique_asset_names, bytearray.compare) == list.sort(
+            output_asset_names,
+            bytearray.compare,
           )
 
         and {
@@ -119,6 +129,7 @@ validator(params: CompetitionParams) {
           out_refs_geq_one?,
           minted_right_nfts?,
           utxo_refs_present_input?,
+          right_user_outputs?,
           right_user_values?,
           right_user_datums?,
         }
