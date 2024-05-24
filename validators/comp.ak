@@ -35,7 +35,7 @@ validator(params: CompetitionParams) {
           utils.minted_right_nfts(
             mint,
             policy_id,
-            ["admin", "mod", "admin-machine"],
+            [("admin", 1), ("mod", 1), ("admin-machine", 1)],
           )
 
         let output_has_admin =
@@ -73,13 +73,14 @@ validator(params: CompetitionParams) {
           utxo_refs_user
             |> list.map(fn(utxo_ref) { utils.unique_nft_name(utxo_ref) })
 
-        let user_machines = list.map(utxo_refs_user, fn(_) { "user-machine" })
-
         let minted_right_nfts =
           utils.minted_right_nfts(
             mint,
             policy_id,
-            list.concat(unique_asset_names, user_machines),
+            [
+              ("user-machine", list.length(utxo_refs_user)),
+              ..list.map(unique_asset_names, fn(an) { (an, 1) })
+            ],
           )
 
         let proof_inputs =

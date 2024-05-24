@@ -90,24 +90,20 @@ pub fn lovelace_geq(value_geq: Value, value_less: Value) {
 pub fn minted_right_nfts(
   mint: MintedValue,
   policy_id: PolicyId,
-  expected_asset_names: List<AssetName>,
+  expected_assets: List<(AssetName, Int)>,
 ) -> Bool {
-  let (minted_assets, minted_amounts) =
+  let minted_assets: List<(AssetName, Int)> =
     mint
       |> value.from_minted_value
       |> value.tokens(policy_id)
       |> dict.to_list
-      |> list.unzip
 
-  let correct_names =
-    list.sort(minted_assets, bytearray.compare) == list.sort(
-      expected_asset_names,
-      bytearray.compare,
-    )
+  let sorted_minted_list =
+    list.sort(minted_assets, fn(a1, a2) { bytearray.compare(a1.1st, a2.1st) })
+  let sorted_expected_list =
+    list.sort(expected_assets, fn(a1, a2) { bytearray.compare(a1.1st, a2.1st) })
 
-  let correct_amounts = list.all(minted_amounts, fn(an) { an == 1 })
-
-  correct_names? && correct_amounts?
+  sorted_minted_list == sorted_expected_list
 }
 
 pub fn unique_nft_name(out_ref: OutputReference) {
