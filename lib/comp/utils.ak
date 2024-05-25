@@ -64,6 +64,7 @@ pub type ScriptDatum {
   }
   ReviewDatum { asset_name: AssetName }
   VoteDatum { asset_name: AssetName, votes: List<AssetName> }
+  RejectDatum { asset_name: AssetName }
 }
 
 pub fn address_from_policy_id(policy_id: PolicyId) -> Address {

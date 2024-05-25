@@ -8,7 +8,8 @@ use aiken/transaction/credential
 use aiken/transaction/value
 use comp/utils.{
   AddVote, Burn, CompetitionParams, CreateComp, CreateUser, CurationDatum,
-  MintRedeemer, ModApprove, ReviewDatum, ScriptDatum, SpendRedeemer, VoteDatum,
+  MintRedeemer, ModApprove, RejectDatum, ReviewDatum, ScriptDatum, SpendRedeemer,
+  VoteDatum,
 }
 
 validator(params: CompetitionParams) {
@@ -153,7 +154,7 @@ validator(params: CompetitionParams) {
   ) -> Bool {
     expect Spend(input_ref) = context.purpose
 
-    let Transaction { inputs, outputs, mint, validity_range, .. } =
+    let Transaction { inputs, outputs, validity_range, .. } =
       context.transaction
 
     expect Some(input) = transaction.find_input(inputs, input_ref)
@@ -255,20 +256,7 @@ validator(params: CompetitionParams) {
           let right_user_value =
             when user_outputs is {
               [Output { value: user_output_value, .. }] ->
-                is_approve && utils.lovelace_geq(
-                  user_output_value,
-                  user_input.output.value,
-                )
-              [] -> {
-                // user-machine must be burnt
-                expect [(an, -1)] =
-                  mint
-                    |> value.from_minted_value
-                    |> value.tokens(policy_id)
-                    |> dict.to_list
-
-                !is_approve && an == "user-machine"
-              }
+                utils.lovelace_geq(user_output_value, user_input.output.value)
               _ -> False
             }
 
@@ -276,10 +264,14 @@ validator(params: CompetitionParams) {
             when user_outputs is {
               [Output { datum, .. }] -> {
                 let user_output_datum = utils.find_datum(datum)
-                expect VoteDatum { asset_name, votes } = user_output_datum
-                is_approve && asset_name == user_input_asset_name && votes == []
+                if is_approve {
+                  expect VoteDatum { asset_name, votes } = user_output_datum
+                  asset_name == user_input_asset_name && votes == []
+                } else {
+                  expect RejectDatum { asset_name } = user_output_datum
+                  asset_name == user_input_asset_name
+                }
               }
-              [] -> !is_approve
               _ -> False
             }
 
