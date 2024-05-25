@@ -7,7 +7,7 @@ use aiken/transaction.{Mint, Output, ScriptContext, Spend, Transaction}
 use aiken/transaction/credential
 use aiken/transaction/value
 use comp/utils.{
-  AddVote, CompetitionParams, CreateComp, CreateUser, CurationDatum,
+  AddVote, Burn, CompetitionParams, CreateComp, CreateUser, CurationDatum,
   MintRedeemer, ModApprove, ReviewDatum, ScriptDatum, SpendRedeemer, VoteDatum,
 }
 
@@ -134,6 +134,14 @@ validator(params: CompetitionParams) {
           right_user_values?,
           right_user_datums?,
         }
+      }
+      Burn -> {
+        let amounts =
+          mint
+            |> value.from_minted_value
+            |> value.tokens(policy_id)
+            |> dict.values
+        list.all(amounts, fn(amt) { amt < 0 })
       }
     }
   }
