@@ -125,7 +125,7 @@ pub fn nft_authenticated(
   expect Some(auth_input) = transaction.find_input(tx.reference_inputs, nft_ref)
 
   and {
-    value.quantity_of(auth_input.output.value, policy_id, redeem_name) == 1,
+    value.quantity_of(auth_input.output.value, policy_id, redeem_name) >= 1,
     list.has(tx.extra_signatories, key),
   }
 }
