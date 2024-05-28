@@ -54,9 +54,10 @@ validator(params: TicketParams) {
             admin_price,
             user_price,
             ticket_policy_id: policy_id,
+            vote_policy_id,
             end_date,
             reward_rates,
-            approved_votes: [],
+            approved_votes: 0,
           }
 
         let utxo_ref_present =

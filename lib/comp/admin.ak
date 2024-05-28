@@ -10,13 +10,18 @@ pub type AdminDatum {
     admin_price: Int,
     user_price: Int,
     ticket_policy_id: PolicyId,
+    vote_policy_id: PolicyId,
     end_date: PosixTime,
     reward_rates: RewardRates,
-    approved_votes: List<AssetName>,
+    approved_votes: Int,
   }
   ADRewards {
-    user_distribution: List<(AssetName, Int)>,
-    vote_distribution: List<(AssetName, Int)>,
+    total_amount: Int,
+    reward_rates: RewardRates,
+    vote_policy_id: PolicyId,
+    first: (AssetName, List<AssetName>),
+    second: (AssetName, List<AssetName>),
+    third: (AssetName, List<AssetName>),
   }
 }
 
@@ -34,7 +39,9 @@ pub type WinnerRate {
 pub type RewardRates {
   admin: Int,
   moderator: Int,
-  winners: List<WinnerRate>,
+  first: WinnerRate,
+  second: WinnerRate,
+  third: WinnerRate,
 }
 
 pub fn find_datum(datum: Datum) -> AdminDatum {
