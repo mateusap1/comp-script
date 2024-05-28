@@ -1,8 +1,9 @@
 use aiken/interval
+use aiken/list
 use aiken/transaction.{Output, ScriptContext, Spend, Transaction}
 use aiken/transaction/value
 use comp/admin.{ADVoting, ARModApprove, AdminDatum, AdminRedeemer}
-use comp/user.{UserDatum}
+use comp/user.{USApproved, USAwaiting, USRejected, UserDatum}
 use comp/utils
 
 validator {
@@ -16,7 +17,8 @@ validator {
     let Transaction { inputs, outputs, validity_range, .. } =
       context.transaction
 
-    expect Some(script_input) = transaction.find_input(inputs, input_ref)
+    expect [script_input] =
+      list.filter(inputs, fn(inp) { inp.output_reference == input_ref })
     let script_address = script_input.output.address
     let script_input_value = script_input.output.value
 
@@ -27,7 +29,6 @@ validator {
           admin_price,
           user_price,
           ticket_policy_id,
-          vote_policy_id,
           end_date,
           reward_rates,
           approved_votes,
@@ -43,11 +44,21 @@ validator {
           admin_price: out_admin_price,
           user_price: out_user_price,
           ticket_policy_id: out_ticket_policy_id,
-          vote_policy_id: out_vote_policy_id,
           end_date: out_end_date,
           reward_rates: out_reward_rates,
           approved_votes: out_approved_votes,
         } = script_output_datum
+
+        let user_input =
+          utils.find_input_with_asset(
+            inputs,
+            user_address,
+            ticket_policy_id,
+            "user-machine",
+          )
+        let user_input_datum = user.find_datum(user_input.output.datum)
+
+        let correct_user_input_state = user_input_datum.state == USAwaiting
 
         let user_output =
           utils.find_output_with_asset(
@@ -57,13 +68,14 @@ validator {
             "user-machine",
           )
         let user_output_datum = user.find_datum(user_output.datum)
-        let UserDatum { asset_name, is_rejected, .. } = user_output_datum
+        let UserDatum { asset_name, state, .. } = user_output_datum
 
         let expected_votes =
-          if is_rejected {
-            approved_votes
-          } else {
-            [asset_name, ..approved_votes]
+          when state is {
+            USApproved ->
+              [asset_name, ..approved_votes]
+            USRejected -> approved_votes
+            USAwaiting -> fail @"Wrong state"
           }
 
         let before_end_date =
@@ -83,7 +95,6 @@ validator {
             admin_price == out_admin_price,
             user_price == out_user_price,
             ticket_policy_id == out_ticket_policy_id,
-            vote_policy_id == out_vote_policy_id,
             end_date == out_end_date,
             reward_rates == out_reward_rates,
             expected_votes == out_approved_votes,
@@ -98,6 +109,7 @@ validator {
           )
 
         and {
+          correct_user_input_state?,
           before_end_date?,
           right_script_value?,
           right_script_datum?,

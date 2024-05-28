@@ -10,7 +10,6 @@ pub type AdminDatum {
     admin_price: Int,
     user_price: Int,
     ticket_policy_id: PolicyId,
-    vote_policy_id: PolicyId,
     end_date: PosixTime,
     reward_rates: RewardRates,
     approved_votes: List<AssetName>,

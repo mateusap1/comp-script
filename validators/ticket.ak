@@ -4,9 +4,9 @@ use aiken/list
 use aiken/option
 use aiken/transaction.{Mint, Output, ScriptContext, Transaction}
 use aiken/transaction/value
-use comp/admin.{ADVoting, AdminDatum}
+use comp/admin.{ADVoting}
 use comp/ticket.{TRAddUser, TRBurn, TRInit, TicketParams, TicketRedeemer}
-use comp/user.{UserDatum, UserValidationData}
+use comp/user.{USAwaiting, UserDatum, UserValidationData}
 use comp/utils
 
 validator(params: TicketParams) {
@@ -20,6 +20,7 @@ validator(params: TicketParams) {
       admin_price,
       user_price,
       end_date,
+      vote_policy_id,
     } = params
 
     let Transaction { inputs, outputs, mint, validity_range, .. } =
@@ -30,7 +31,7 @@ validator(params: TicketParams) {
         // This enforces that there is one unique script output
         expect [admin_output] =
           utils.find_outputs_with_address(outputs, admin_address)
-        expect admin_output_datum = admin.find_datum(admin_output.datum)
+        let admin_output_datum = admin.find_datum(admin_output.datum)
 
         let minted_right_nfts =
           utils.minted_right_nfts(
@@ -45,8 +46,7 @@ validator(params: TicketParams) {
         let admin_output_has_price =
           value.lovelace_of(admin_output.value) >= admin_price
 
-        expect ADVoting { vote_policy_id, reward_rates, .. } =
-          admin_output_datum
+        expect ADVoting { reward_rates, .. } = admin_output_datum
 
         let admin_output_has_right_datum =
           admin_output_datum == ADVoting {
@@ -54,7 +54,6 @@ validator(params: TicketParams) {
             admin_price,
             user_price,
             ticket_policy_id: policy_id,
-            vote_policy_id,
             end_date,
             reward_rates,
             approved_votes: [],
@@ -143,9 +142,11 @@ validator(params: TicketParams) {
                 value.lovelace_of(val) >= user_price,
                 value.quantity_of(val, policy_id, "user-machine") == 1,
                 datum == UserDatum {
-                  is_rejected: False,
+                  admin_address,
+                  state: USAwaiting,
                   asset_name,
                   ticket_policy_id: policy_id,
+                  vote_policy_id,
                   end_date,
                   votes: [],
                 },

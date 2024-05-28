@@ -4,18 +4,26 @@ use aiken/transaction/credential.{Address}
 use aiken/transaction/value.{AssetName, PolicyId, Value}
 use comp/utils.{Auth}
 
+pub type UserState {
+  USRejected
+  USApproved
+  USAwaiting
+}
+
 pub type UserDatum {
-  is_rejected: Bool,
+  admin_address: Address,
+  state: UserState,
   asset_name: AssetName,
   ticket_policy_id: PolicyId,
+  vote_policy_id: PolicyId,
   end_date: PosixTime,
   votes: List<AssetName>,
 }
 
 pub type UserRedeemer {
-  UModApprove { auth: Auth, is_approve: Bool }
-  UAddVote { auth: Auth, vote_asset_name: AssetName }
-  UCollect
+  URModApprove { is_approve: Bool }
+  URAddVote { auth: Auth, vote_asset_name: AssetName }
+  URCollect
 }
 
 pub fn find_datum(datum: Datum) -> UserDatum {
