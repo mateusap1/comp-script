@@ -4,7 +4,7 @@ use aiken/list
 use aiken/option
 use aiken/transaction.{Mint, Output, ScriptContext, Transaction}
 use aiken/transaction/value
-use comp/admin.{AdminDatum}
+use comp/admin.{ADVoting, AdminDatum}
 use comp/ticket.{TRAddUser, TRBurn, TRInit, TicketParams, TicketRedeemer}
 use comp/user.{UserDatum, UserValidationData}
 use comp/utils
@@ -30,7 +30,7 @@ validator(params: TicketParams) {
         // This enforces that there is one unique script output
         expect [admin_output] =
           utils.find_outputs_with_address(outputs, admin_address)
-        let admin_output_datum = admin.find_datum(admin_output.datum)
+        expect admin_output_datum = admin.find_datum(admin_output.datum)
 
         let minted_right_nfts =
           utils.minted_right_nfts(
@@ -45,14 +45,19 @@ validator(params: TicketParams) {
         let admin_output_has_price =
           value.lovelace_of(admin_output.value) >= admin_price
 
+        expect ADVoting { vote_policy_id, reward_rates, .. } =
+          admin_output_datum
+
         let admin_output_has_right_datum =
-          admin_output_datum == AdminDatum {
-            ..admin_output_datum,
-            admin_price: admin_price,
+          admin_output_datum == ADVoting {
+            user_address,
+            admin_price,
+            user_price,
             ticket_policy_id: policy_id,
-            end_date: end_date,
+            vote_policy_id,
+            end_date,
+            reward_rates,
             approved_votes: [],
-            rejected_votes: [],
           }
 
         let utxo_ref_present =

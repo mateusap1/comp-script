@@ -1,218 +1,110 @@
-// use aiken/bytearray
-// use aiken/dict
-// use aiken/interval
-// use aiken/list
-// use aiken/option
-// use aiken/transaction.{Mint, Output, ScriptContext, Spend, Transaction}
-// use aiken/transaction/credential
-// use aiken/transaction/value
+use aiken/interval
+use aiken/transaction.{Output, ScriptContext, Spend, Transaction}
+use aiken/transaction/value
+use comp/admin.{ADVoting, ARModApprove, AdminDatum, AdminRedeemer}
+use comp/user.{UserDatum}
+use comp/utils
 
-// validator(params: CompetitionParams) {
-//   fn spend(
-//     input_datum: ScriptDatum,
-//     redeemer: SpendRedeemer,
-//     context: ScriptContext,
-//   ) -> Bool {
-//     expect Spend(input_ref) = context.purpose
+validator {
+  fn spend(
+    input_datum: AdminDatum,
+    redeemer: AdminRedeemer,
+    context: ScriptContext,
+  ) -> Bool {
+    expect Spend(input_ref) = context.purpose
 
-//     let Transaction { inputs, outputs, validity_range, .. } =
-//       context.transaction
+    let Transaction { inputs, outputs, validity_range, .. } =
+      context.transaction
 
-//     expect Some(input) = transaction.find_input(inputs, input_ref)
-//     let address = input.output.address
+    expect Some(script_input) = transaction.find_input(inputs, input_ref)
+    let script_address = script_input.output.address
+    let script_input_value = script_input.output.value
 
-//     expect Some(first_input) =
-//       list.find(inputs, fn(inp) { inp.output.address == address })
+    when redeemer is {
+      ARModApprove { auth } -> {
+        expect ADVoting {
+          user_address,
+          admin_price,
+          user_price,
+          ticket_policy_id,
+          vote_policy_id,
+          end_date,
+          reward_rates,
+          approved_votes,
+        } = input_datum
 
-//     let is_first_input = first_input == input
+        expect [script_output] =
+          utils.find_outputs_with_address(outputs, script_address)
+        let script_output_value = script_output.value
 
-//     if !is_first_input {
-//       // If it is the first script of the inputs, execute, otherwise return true
+        let script_output_datum = admin.find_datum(script_output.datum)
+        expect ADVoting {
+          user_address: out_user_address,
+          admin_price: out_admin_price,
+          user_price: out_user_price,
+          ticket_policy_id: out_ticket_policy_id,
+          vote_policy_id: out_vote_policy_id,
+          end_date: out_end_date,
+          reward_rates: out_reward_rates,
+          approved_votes: out_approved_votes,
+        } = script_output_datum
 
-//       True
-//     } else {
-//       let policy_id = utils.policy_id_from_address(address)
+        let user_output =
+          utils.find_output_with_asset(
+            outputs,
+            user_address,
+            ticket_policy_id,
+            "user-machine",
+          )
+        let user_output_datum = user.find_datum(user_output.datum)
+        let UserDatum { asset_name, is_rejected, .. } = user_output_datum
 
-//       when redeemer is {
-//         ModApprove { auth, is_approve } -> {
-//           // The following is so we know that we have a unique admin
-//           // script input and a unique admin script output
-//           // Also that their datum is CurationDatum
-//           let admin_input =
-//             utils.find_input_with_asset(
-//               inputs,
-//               address,
-//               policy_id,
-//               "admin-machine",
-//             )
-//           let admin_input_datum = utils.find_datum(admin_input.output.datum)
-//           expect CurationDatum {
-//             approved_votes: admin_input_app,
-//             rejected_votes: admin_input_rej,
-//           } = admin_input_datum
+        let expected_votes =
+          if is_rejected {
+            approved_votes
+          } else {
+            [asset_name, ..approved_votes]
+          }
 
-//           let admin_output =
-//             utils.find_output_with_asset(
-//               outputs,
-//               address,
-//               policy_id,
-//               "admin-machine",
-//             )
-//           let admin_output_datum = utils.find_datum(admin_output.datum)
-//           expect CurationDatum {
-//             approved_votes: admin_output_app,
-//             rejected_votes: admin_output_rej,
-//           } = admin_output_datum
+        let before_end_date =
+          interval.is_entirely_before(validity_range, end_date)
 
-//           // Let's get the user information now
-//           let user_input =
-//             utils.find_input_with_asset(
-//               inputs,
-//               address,
-//               policy_id,
-//               "user-machine",
-//             )
-//           let user_input_datum = utils.find_datum(user_input.output.datum)
-//           expect ReviewDatum(user_input_asset_name) = user_input_datum
+        let right_script_value = and {
+            utils.lovelace_geq(script_input_value, script_output_value),
+            value.quantity_of(
+              script_output_value,
+              ticket_policy_id,
+              "admin-machine",
+            ) == 1,
+          }
 
-//           let user_outputs =
-//             utils.outputs_with_asset(
-//               outputs,
-//               address,
-//               policy_id,
-//               "user-machine",
-//             )
+        let right_script_datum = and {
+            user_address == out_user_address,
+            admin_price == out_admin_price,
+            user_price == out_user_price,
+            ticket_policy_id == out_ticket_policy_id,
+            vote_policy_id == out_vote_policy_id,
+            end_date == out_end_date,
+            reward_rates == out_reward_rates,
+            expected_votes == out_approved_votes,
+          }
 
-//           let before_end_date =
-//             interval.is_entirely_before(validity_range, params.end_date)
+        let mod_authenticated =
+          utils.nft_authenticated(
+            context.transaction,
+            auth,
+            ticket_policy_id,
+            "mod",
+          )
 
-//           let admin_input_value = admin_input.output.value
-//           let admin_output_value = admin_output.value
-
-//           let right_admin_value =
-//             utils.lovelace_geq(admin_input_value, admin_output_value)
-
-//           let expected_app_votes =
-//             if is_approve {
-//               [user_input_asset_name, ..admin_input_app]
-//             } else {
-//               admin_input_app
-//             }
-//           let expected_rej_votes =
-//             if is_approve {
-//               admin_input_rej
-//             } else {
-//               [user_input_asset_name, ..admin_input_rej]
-//             }
-
-//           let right_admin_datum = and {
-//               admin_output_app == expected_app_votes,
-//               admin_output_rej == expected_rej_votes,
-//             }
-
-//           let mod_authenticated =
-//             context.transaction
-//               |> utils.nft_authenticated(auth, policy_id, "mod")
-
-//           let right_user_value =
-//             when user_outputs is {
-//               [Output { value: user_output_value, .. }] ->
-//                 utils.lovelace_geq(user_output_value, user_input.output.value)
-//               _ -> False
-//             }
-
-//           let right_user_datum =
-//             when user_outputs is {
-//               [Output { datum, .. }] -> {
-//                 let user_output_datum = utils.find_datum(datum)
-//                 if is_approve {
-//                   expect VoteDatum { asset_name, votes } = user_output_datum
-//                   asset_name == user_input_asset_name && votes == []
-//                 } else {
-//                   expect RejectDatum { asset_name } = user_output_datum
-//                   asset_name == user_input_asset_name
-//                 }
-//               }
-//               _ -> False
-//             }
-
-//           and {
-//             before_end_date?,
-//             right_admin_value?,
-//             right_admin_datum?,
-//             mod_authenticated?,
-//             right_user_value?,
-//             right_user_datum,
-//           }
-//         }
-//         AddVote(auth, vote_asset_name) -> {
-//           let user_input =
-//             utils.find_input_with_asset(
-//               inputs,
-//               address,
-//               policy_id,
-//               "user-machine",
-//             )
-//           let user_input_datum = utils.find_datum(user_input.output.datum)
-//           expect VoteDatum {
-//             asset_name: user_input_asset_name,
-//             votes: user_input_votes,
-//           } = user_input_datum
-
-//           let user_output =
-//             utils.find_output_with_asset(
-//               outputs,
-//               address,
-//               policy_id,
-//               "user-machine",
-//             )
-//           let user_output_datum = utils.find_datum(user_output.datum)
-//           expect VoteDatum {
-//             asset_name: user_output_asset_name,
-//             votes: user_output_votes,
-//           } = user_output_datum
-
-//           let before_end_date =
-//             interval.is_entirely_before(validity_range, params.end_date)
-
-//           let right_user_value =
-//             utils.lovelace_geq(user_output.value, user_input.output.value)
-
-//           let right_user_datum = and {
-//               user_output_asset_name == user_input_asset_name,
-//               user_output_votes == [vote_asset_name, ..user_input_votes],
-//             }
-
-//           let vote_not_repeated =
-//             user_input_votes
-//               |> list.find(fn(an) { an == vote_asset_name })
-//               |> option.is_none()
-
-//           let vote_authenticated =
-//             context.transaction
-//               |> utils.nft_authenticated(
-//                   auth,
-//                   params.vote_policy_id,
-//                   vote_asset_name,
-//                 )
-//           let unique_script_input =
-//             (
-//               inputs
-//                 |> list.filter(fn(inp) { inp.output.address == address })
-//                 |> list.length
-//             ) == 1
-
-//           and {
-//             before_end_date?,
-//             right_user_value?,
-//             right_user_datum?,
-//             vote_not_repeated?,
-//             vote_authenticated?,
-//             unique_script_input?,
-//           }
-//         }
-//         _ -> False
-//       }
-//     }
-//   }
-// }
+        and {
+          before_end_date?,
+          right_script_value?,
+          right_script_datum?,
+          mod_authenticated?,
+        }
+      }
+      _ -> False
+    }
+  }
+}

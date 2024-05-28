@@ -1,22 +1,30 @@
 use aiken/time.{PosixTime}
 use aiken/transaction.{Datum, InlineDatum}
+use aiken/transaction/credential.{Address}
 use aiken/transaction/value.{AssetName, PolicyId}
 use comp/utils.{Auth}
 
 pub type AdminDatum {
-  admin_price: Int,
-  user_price: Int,
-  ticket_policy_id: PolicyId,
-  end_date: PosixTime,
-  reward_rates: RewardRates,
-  approved_votes: List<AssetName>,
-  rejected_votes: List<AssetName>,
+  ADVoting {
+    user_address: Address,
+    admin_price: Int,
+    user_price: Int,
+    ticket_policy_id: PolicyId,
+    vote_policy_id: PolicyId,
+    end_date: PosixTime,
+    reward_rates: RewardRates,
+    approved_votes: List<AssetName>,
+  }
+  ADRewards {
+    user_distribution: List<(AssetName, Int)>,
+    vote_distribution: List<(AssetName, Int)>,
+  }
 }
 
 pub type AdminRedeemer {
-  AModApprove { auth: Auth, is_approve: Bool }
-  ACollectRewards
-  AClaimRewards { asset_name: AssetName, role: ClaimRole }
+  ARModApprove { auth: Auth }
+  ARCollectRewards
+  ARClaimRewards { asset_name: AssetName }
 }
 
 pub type WinnerRate {
@@ -28,11 +36,6 @@ pub type RewardRates {
   admin: Int,
   moderator: Int,
   winners: List<WinnerRate>,
-}
-
-pub type ClaimRole {
-  User
-  Voter
 }
 
 pub fn find_datum(datum: Datum) -> AdminDatum {
