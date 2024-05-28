@@ -5,7 +5,9 @@ use aiken/math/rational
 use aiken/transaction.{Output, ScriptContext, Spend, Transaction}
 use aiken/transaction/value
 use comp/admin.{
-  ADRewards, ADVoting, ARCollectRewards, ARModApprove, AdminDatum, AdminRedeemer,
+  ADRewards, ADVoting, ARClaimRewards, ARCollectRewards, ARModApprove,
+  AdminDatum, AdminRedeemer, CRFirstUser, CRFirstVoter, CRSecondUser,
+  CRSecondVoter, CRThirdUser, CRThirdVoter,
 }
 use comp/user.{USApproved, USAwaiting, USRejected, UserDatum}
 use comp/utils
@@ -248,6 +250,7 @@ validator {
         expect ADRewards {
           total_amount: out_total_amount,
           reward_rates: out_reward_rates,
+          ticket_policy_id: out_ticket_policy_id,
           vote_policy_id: out_vote_policy_id,
           first: out_first,
           second: out_second,
@@ -258,9 +261,10 @@ validator {
             out_total_amount == total_amount,
             out_reward_rates == reward_rates,
             out_vote_policy_id == vote_policy_id,
-            out_first == (fst.1st, fst.2nd),
-            out_second == (snd.1st, snd.2nd),
-            out_third == (trd.1st, trd.2nd),
+            out_ticket_policy_id == ticket_policy_id,
+            out_first == (Some(fst.1st), fst.2nd),
+            out_second == (Some(snd.1st), snd.2nd),
+            out_third == (Some(trd.1st), trd.2nd),
           }
 
         expect [(an, amt)] =
@@ -282,7 +286,141 @@ validator {
           users_destroyed?,
         }
       }
-      _ -> False
+      ARClaimRewards { auth, role } -> {
+        expect ADRewards {
+          total_amount,
+          reward_rates,
+          ticket_policy_id,
+          vote_policy_id,
+          first,
+          second,
+          third,
+        } = input_datum
+
+        let (policy_id, asset_name, rate_abs, new_first, new_second, new_third) =
+          when role is {
+            CRFirstUser -> {
+              expect Some(an) = first.1st
+              (
+                ticket_policy_id,
+                an,
+                reward_rates.first.user,
+                (None, first.2nd),
+                second,
+                third,
+              )
+            }
+            CRFirstVoter(idx) -> {
+              expect Some(an) = list.at(first.2nd, idx)
+              (
+                vote_policy_id,
+                an,
+                reward_rates.first.vote,
+                (first.1st, list.delete(first.2nd, an)),
+                second,
+                third,
+              )
+            }
+            CRSecondUser -> {
+              expect Some(an) = second.1st
+              (
+                ticket_policy_id,
+                an,
+                reward_rates.second.user,
+                first,
+                (None, second.2nd),
+                third,
+              )
+            }
+            CRSecondVoter(idx) -> {
+              expect Some(an) = list.at(second.2nd, idx)
+              (
+                vote_policy_id,
+                an,
+                reward_rates.second.vote,
+                first,
+                (second.1st, list.delete(second.2nd, an)),
+                third,
+              )
+            }
+            CRThirdUser -> {
+              expect Some(an) = third.1st
+              (
+                ticket_policy_id,
+                an,
+                reward_rates.third.user,
+                first,
+                second,
+                (None, third.2nd),
+              )
+            }
+            CRThirdVoter(idx) -> {
+              expect Some(an) = list.at(third.2nd, idx)
+              (
+                vote_policy_id,
+                an,
+                reward_rates.third.vote,
+                first,
+                second,
+                (third.1st, list.delete(third.2nd, an)),
+              )
+            }
+          }
+
+        let nft_from_user =
+          utils.nft_authenticated(
+            context.transaction,
+            auth,
+            policy_id,
+            asset_name,
+          )
+
+        expect Some(rate) = rational.new(rate_abs, 100)
+        let expected_rewards =
+          rate
+            |> rational.mul(rational.from_int(total_amount))
+            |> rational.truncate
+
+        let script_output =
+          utils.find_output_with_asset(
+            outputs,
+            script_address,
+            ticket_policy_id,
+            "admin-machine",
+          )
+        let script_output_datum = admin.find_datum(script_output.datum)
+
+        let right_output_value =
+          value.lovelace_of(script_output.value) >= value.lovelace_of(
+            script_input_value,
+          ) - expected_rewards
+
+        expect ADRewards {
+          total_amount: total_amount_out,
+          reward_rates: reward_rates_out,
+          ticket_policy_id: ticket_policy_id_out,
+          vote_policy_id: vote_policy_id_out,
+          first: first_out,
+          second: second_out,
+          third: third_out,
+        } = script_output_datum
+
+        let right_output_datum = and {
+            total_amount_out == total_amount,
+            reward_rates_out == reward_rates,
+            ticket_policy_id_out == ticket_policy_id,
+            vote_policy_id_out == vote_policy_id,
+            first_out == new_first,
+            second_out == new_second,
+            third_out == new_third,
+          }
+
+        and {
+          nft_from_user?,
+          right_output_value?,
+          right_output_datum?,
+        }
+      }
     }
   }
 }

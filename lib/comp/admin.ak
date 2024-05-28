@@ -18,17 +18,29 @@ pub type AdminDatum {
   ADRewards {
     total_amount: Int,
     reward_rates: RewardRates,
+    ticket_policy_id: PolicyId,
     vote_policy_id: PolicyId,
-    first: (AssetName, List<AssetName>),
-    second: (AssetName, List<AssetName>),
-    third: (AssetName, List<AssetName>),
+    first: (Option<AssetName>, List<AssetName>),
+    second: (Option<AssetName>, List<AssetName>),
+    third: (Option<AssetName>, List<AssetName>),
   }
+}
+
+pub type ClaimerRole {
+  CRFirstUser
+  CRFirstVoter { index: Int }
+
+  CRSecondUser
+  CRSecondVoter { index: Int }
+
+  CRThirdUser
+  CRThirdVoter { index: Int }
 }
 
 pub type AdminRedeemer {
   ARModApprove { auth: Auth }
   ARCollectRewards
-  ARClaimRewards { asset_name: AssetName }
+  ARClaimRewards { auth: Auth, role: ClaimerRole }
 }
 
 pub type WinnerRate {
