@@ -73,14 +73,17 @@ validator(params: TicketParams) {
           utxo_ref_present?,
         }
       }
-      TRAddUser(utxo_refs_map) -> {
+      TRAddUser(utxo_refs) -> {
+        let user_outputs =
+          utils.find_outputs_with_address(outputs, user_address)
+        let all_utxo_refs_have_output =
+          list.length(user_outputs) == list.length(utxo_refs)
+
         let user_validations =
           list.map(
-            utxo_refs_map,
-            fn(ref_map) {
-              let (utxo_ref, out_idx) = ref_map
-
-              expect Some(output) = list.at(outputs, out_idx)
+            list.zip(user_outputs, utxo_refs),
+            fn(out) {
+              let (output, utxo_ref) = out
               let datum = user.find_datum(output.datum)
 
               UserValidationData {
@@ -91,8 +94,6 @@ validator(params: TicketParams) {
               }
             },
           )
-
-        let (utxo_refs, output_indexes) = list.unzip(utxo_refs_map)
 
         let proof_inputs =
           list.filter(
@@ -108,23 +109,9 @@ validator(params: TicketParams) {
             mint,
             policy_id,
             [
-              ("user-machine", list.length(utxo_refs_map)),
+              ("user-machine", list.length(utxo_refs)),
               ..list.map(user_validations, fn(uvd) { (uvd.asset_name, 1) })
             ],
-          )
-
-        let (_, output_indexes_not_repeated) =
-          list.foldr(
-            output_indexes,
-            ([], False),
-            fn(an, acc) {
-              let (ans_acc, flag_acc) = acc
-              if list.has(ans_acc, an) {
-                (ans_acc, False)
-              } else {
-                ([an, ..ans_acc], flag_acc)
-              }
-            },
           )
 
         // Also enforces that they are unique, you cannot consume the same
@@ -158,9 +145,9 @@ validator(params: TicketParams) {
         and {
           before_end_date?,
           minted_right_nfts?,
-          output_indexes_not_repeated,
+          all_utxo_refs_have_output?,
           all_utxo_refs_present?,
-          valid_outputs,
+          valid_outputs?,
         }
       }
       TRBurn -> {

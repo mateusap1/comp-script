@@ -5,7 +5,7 @@ use aiken/transaction/value.{PolicyId}
 
 pub type TicketRedeemer {
   TRInit
-  TRAddUser { utxo_refs: List<(OutputReference, Int)> }
+  TRAddUser { utxo_refs: List<OutputReference> }
   TRBurn
 }
 
