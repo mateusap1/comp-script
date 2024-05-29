@@ -39,7 +39,7 @@ pub type ClaimerRole {
 
 pub type AdminRedeemer {
   ARModApprove { auth: Auth }
-  ARCollectRewards
+  ARCollectRewards { auth: Auth }
   ARClaimRewards { auth: Auth, role: ClaimerRole }
 }
 

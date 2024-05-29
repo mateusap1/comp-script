@@ -7,7 +7,7 @@ use aiken/transaction/value
 use comp/admin.{
   ADRewards, ADVoting, ARClaimRewards, ARCollectRewards, ARModApprove,
   AdminDatum, AdminRedeemer, CRFirstUser, CRFirstVoter, CRSecondUser,
-  CRSecondVoter, CRThirdUser, CRThirdVoter,
+  CRSecondVoter, CRThirdUser, CRThirdVoter, RewardRates, WinnerRate,
 }
 use comp/user.{USApproved, USAwaiting, USRejected, UserDatum}
 use comp/utils
@@ -20,8 +20,14 @@ validator {
   ) -> Bool {
     expect Spend(input_ref) = context.purpose
 
-    let Transaction { inputs, outputs, validity_range, mint, .. } =
-      context.transaction
+    let Transaction {
+      reference_inputs,
+      inputs,
+      outputs,
+      validity_range,
+      mint,
+      ..
+    } = context.transaction
 
     expect [script_input] =
       list.filter(inputs, fn(inp) { inp.output_reference == input_ref })
@@ -29,7 +35,7 @@ validator {
     let script_input_value = script_input.output.value
 
     when redeemer is {
-      ARModApprove { auth } -> {
+      ARModApprove(auth) -> {
         expect ADVoting {
           user_address,
           admin_price,
@@ -124,7 +130,7 @@ validator {
           mod_authenticated?,
         }
       }
-      ARCollectRewards -> {
+      ARCollectRewards(auth) -> {
         expect ADVoting {
           user_address,
           admin_price,
@@ -166,7 +172,7 @@ validator {
         let (fst, snd, trd, all_approved) =
           list.foldr(
             user_inputs,
-            (("", [], -1), ("", [], -1), ("", [], -1), True),
+            ((None, [], -1), (None, [], -1), (None, [], -1), True),
             fn(inp, acc) {
               let (inp1, inp2, inp3, all_valid) = acc
               let (_, _, votes1) = inp1
@@ -181,7 +187,7 @@ validator {
 
               if vote_num > votes1 {
                 (
-                  (asset_name, votes, vote_num),
+                  (Some(asset_name), votes, vote_num),
                   inp1,
                   inp2,
                   correct_state && all_valid,
@@ -189,7 +195,7 @@ validator {
               } else if vote_num > votes2 {
                 (
                   inp1,
-                  (asset_name, votes, vote_num),
+                  (Some(asset_name), votes, vote_num),
                   inp2,
                   correct_state && all_valid,
                 )
@@ -197,7 +203,7 @@ validator {
                 (
                   inp1,
                   inp2,
-                  (asset_name, votes, vote_num),
+                  (Some(asset_name), votes, vote_num),
                   correct_state && all_valid,
                 )
               } else {
@@ -208,23 +214,18 @@ validator {
 
         let all_users_present = list.length(user_inputs) == approved_votes
 
-        expect [admin_input] =
-          list.filter(
-            inputs,
-            fn(inp) {
-              value.quantity_of(inp.output.value, ticket_policy_id, "admin") == 1
-            },
+        // Signed by admin and mod output correct
+        let admin_authenticated =
+          utils.nft_authenticated(
+            context.transaction,
+            auth,
+            ticket_policy_id,
+            "admin",
           )
-
-        expect [admin_output] =
-          utils.find_outputs_with_address(outputs, admin_input.output.address)
-
-        let admin_received =
-          value.lovelace_of(admin_output.value) >= admin_expected
 
         expect [mod_input] =
           list.filter(
-            inputs,
+            reference_inputs,
             fn(inp) {
               value.quantity_of(inp.output.value, ticket_policy_id, "mod") == 1
             },
@@ -247,6 +248,23 @@ validator {
         let correct_value =
           value.lovelace_of(script_output.value) >= user_amount
 
+        let first_vote_rate =
+          when rational.new(reward_rates.first.vote, list.length(fst.2nd)) is {
+            Some(v) -> rational.truncate(v)
+            None -> 0
+          }
+
+        let second_vote_rate =
+          when rational.new(reward_rates.second.vote, list.length(snd.2nd)) is {
+            Some(v) -> rational.truncate(v)
+            None -> 0
+          }
+
+        let third_vote_rate =
+          when rational.new(reward_rates.third.vote, list.length(trd.2nd)) is {
+            Some(v) -> rational.truncate(v)
+            None -> 0
+          }
         expect ADRewards {
           total_amount: out_total_amount,
           reward_rates: out_reward_rates,
@@ -257,14 +275,22 @@ validator {
           third: out_third,
         } = script_output_datum
 
+        let expected_reward_rates =
+          RewardRates {
+            ..reward_rates,
+            first: WinnerRate { ..reward_rates.first, vote: first_vote_rate },
+            second: WinnerRate { ..reward_rates.second, vote: second_vote_rate },
+            third: WinnerRate { ..reward_rates.third, vote: third_vote_rate },
+          }
+
         let correct_datum = and {
             out_total_amount == total_amount,
-            out_reward_rates == reward_rates,
+            out_reward_rates == expected_reward_rates,
             out_vote_policy_id == vote_policy_id,
             out_ticket_policy_id == ticket_policy_id,
-            out_first == (Some(fst.1st), fst.2nd),
-            out_second == (Some(snd.1st), snd.2nd),
-            out_third == (Some(trd.1st), trd.2nd),
+            out_first == (fst.1st, fst.2nd),
+            out_second == (snd.1st, snd.2nd),
+            out_third == (trd.1st, trd.2nd),
           }
 
         expect [(an, amt)] =
@@ -279,7 +305,7 @@ validator {
           after_end_date?,
           all_approved?,
           all_users_present?,
-          admin_received?,
+          admin_authenticated?,
           mod_received?,
           correct_value?,
           correct_datum?,
