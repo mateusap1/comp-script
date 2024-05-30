@@ -6,7 +6,7 @@ use aiken/transaction.{Mint, Output, ScriptContext, Transaction}
 use aiken/transaction/value
 use comp/admin.{ASVoting, AdminDatum}
 use comp/ticket.{TRAddUser, TRBurn, TRInit, TicketParams, TicketRedeemer}
-use comp/user.{USAwaiting, UserDatum, UserValidationData}
+use comp/user.{USAwaiting, UserDatum}
 use comp/utils
 
 validator(params: TicketParams) {
@@ -25,6 +25,14 @@ validator(params: TicketParams) {
     let Transaction { inputs, outputs, mint, validity_range, .. } =
       context.transaction
 
+    let minted_sorted =
+      utils.sort_assets(
+        mint
+          |> value.from_minted_value
+          |> value.tokens(policy_id)
+          |> dict.to_list,
+      )
+
     when redeemer is {
       TRInit -> {
         expect [admin_output] =
@@ -32,9 +40,7 @@ validator(params: TicketParams) {
         let admin_output_datum = admin.find_datum(admin_output.datum)
 
         let minted_right_nfts =
-          utils.minted_right_nfts(
-            mint,
-            policy_id,
+          minted_sorted == utils.sort_assets(
             [("admin", 1), ("mod", 1), ("admin-machine", 1)],
           )
 
@@ -74,25 +80,17 @@ validator(params: TicketParams) {
       }
       TRAddUser(utxo_refs) -> {
         let user_outputs =
-          utils.find_outputs_with_address(outputs, user_address)
+          utils.outputs_with_asset(
+            outputs,
+            user_address,
+            policy_id,
+            "user-machine",
+          )
         let all_utxo_refs_have_output =
           list.length(user_outputs) == list.length(utxo_refs)
 
-        let user_validations =
-          list.map(
-            list.zip(user_outputs, utxo_refs),
-            fn(out) {
-              let (output, utxo_ref) = out
-              let datum = user.find_datum(output.datum)
-
-              UserValidationData {
-                asset_name: utils.unique_nft_name(utxo_ref),
-                address: output.address,
-                value: output.value,
-                datum,
-              }
-            },
-          )
+        let user_datums =
+          list.map(user_outputs, fn(out) { user.find_datum(out.datum) })
 
         let proof_inputs =
           list.filter(
@@ -104,12 +102,10 @@ validator(params: TicketParams) {
           interval.is_entirely_before(validity_range, end_date)
 
         let minted_right_nfts =
-          utils.minted_right_nfts(
-            mint,
-            policy_id,
+          minted_sorted == utils.sort_assets(
             [
               ("user-machine", list.length(utxo_refs)),
-              ..list.map(user_validations, fn(uvd) { (uvd.asset_name, 1) })
+              ..list.map(utxo_refs, fn(ref) { (utils.unique_nft_name(ref), 1) })
             ],
           )
 
@@ -120,25 +116,22 @@ validator(params: TicketParams) {
 
         let valid_outputs =
           list.all(
-            user_validations,
-            fn(validation) {
-              let UserValidationData { asset_name, address, value: val, datum } =
-                validation
+            list.zip(user_outputs, user_datums),
+            fn(o) {
+              let (out, dat) = o
               and {
-                address == user_address,
-                value.lovelace_of(val) >= user_price,
-                value.quantity_of(val, policy_id, "user-machine") == 1,
-                datum == UserDatum {
-                  admin_address,
+                value.lovelace_of(out.value) >= user_price,
+                value.quantity_of(out.value, policy_id, dat.asset_name) == 1,
+                dat == UserDatum {
+                  ..dat,
+                  admin_address: admin_address,
                   state: USAwaiting,
-                  asset_name,
                   ticket_policy_id: policy_id,
                   votes: [],
                 },
               }
             },
           )
-
         and {
           before_end_date?,
           minted_right_nfts?,

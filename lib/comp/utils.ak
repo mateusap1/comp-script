@@ -36,6 +36,10 @@ pub fn lovelace_geq(value_geq: Value, value_less: Value) {
   value.lovelace_of(value_geq) >= value.lovelace_of(value_less)
 }
 
+pub fn sort_assets(assets: List<(AssetName, Int)>) -> List<(AssetName, Int)> {
+  list.sort(assets, fn(a1, a2) { bytearray.compare(a1.1st, a2.1st) })
+}
+
 pub fn minted_right_nfts(
   mint: MintedValue,
   policy_id: PolicyId,

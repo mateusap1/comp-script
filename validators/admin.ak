@@ -59,7 +59,7 @@ validator(params: AdminParams) {
         "user-machine",
       )
 
-    let after_end_date = interval.is_entirely_before(validity_range, end_date)
+    let after_end_date = interval.is_entirely_after(validity_range, end_date)
 
     let script_output =
       utils.find_output_with_asset(
