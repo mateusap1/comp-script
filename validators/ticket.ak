@@ -4,7 +4,7 @@ use aiken/list
 use aiken/option
 use aiken/transaction.{Mint, Output, ScriptContext, Transaction}
 use aiken/transaction/value
-use comp/admin.{ADVoting}
+use comp/admin.{ASVoting, AdminDatum}
 use comp/ticket.{TRAddUser, TRBurn, TRInit, TicketParams, TicketRedeemer}
 use comp/user.{USAwaiting, UserDatum, UserValidationData}
 use comp/utils
@@ -20,7 +20,6 @@ validator(params: TicketParams) {
       admin_price,
       user_price,
       end_date,
-      vote_policy_id,
     } = params
 
     let Transaction { inputs, outputs, mint, validity_range, .. } =
@@ -28,7 +27,6 @@ validator(params: TicketParams) {
 
     when redeemer is {
       TRInit -> {
-        // This enforces that there is one unique script output
         expect [admin_output] =
           utils.find_outputs_with_address(outputs, admin_address)
         let admin_output_datum = admin.find_datum(admin_output.datum)
@@ -46,18 +44,19 @@ validator(params: TicketParams) {
         let admin_output_has_price =
           value.lovelace_of(admin_output.value) >= admin_price
 
-        expect ADVoting { reward_rates, .. } = admin_output_datum
-
         let admin_output_has_right_datum =
-          admin_output_datum == ADVoting {
+          admin_output_datum == AdminDatum {
+            state: ASVoting,
             user_address,
-            admin_price,
-            user_price,
+            total_approved: 0,
+            total_amount: 0,
             ticket_policy_id: policy_id,
-            vote_policy_id,
-            end_date,
-            reward_rates,
-            approved_votes: 0,
+            user_rewards: [],
+            user_asset_names: [],
+            user_claimed: [],
+            vote_rewards: [],
+            vote_asset_names: [],
+            vote_claimed: [],
           }
 
         let utxo_ref_present =
@@ -134,8 +133,6 @@ validator(params: TicketParams) {
                   state: USAwaiting,
                   asset_name,
                   ticket_policy_id: policy_id,
-                  vote_policy_id,
-                  end_date,
                   votes: [],
                 },
               }

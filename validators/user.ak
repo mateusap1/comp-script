@@ -3,14 +3,14 @@ use aiken/list
 use aiken/option
 use aiken/transaction.{Output, ScriptContext, Spend, Transaction}
 use aiken/transaction/value
-use comp/admin.{ADRewards, ADVoting}
+use comp/admin.{ASVoting, AdminDatum}
 use comp/user.{
   URAddVote, URCollect, URModApprove, USApproved, USAwaiting, USRejected,
-  UserDatum, UserRedeemer,
+  USVoted, UserDatum, UserParams, UserRedeemer,
 }
 use comp/utils
 
-validator {
+validator(params: UserParams) {
   fn spend(
     input_datum: UserDatum,
     redeemer: UserRedeemer,
@@ -18,38 +18,43 @@ validator {
   ) -> Bool {
     expect Spend(input_ref) = context.purpose
 
+    let UserParams { end_date, vote_policy_id } = params
+
     let Transaction { inputs, outputs, validity_range, .. } =
       context.transaction
 
-    when redeemer is {
-      URModApprove { is_approve } -> {
-        expect [script_input] =
-          list.filter(inputs, fn(inp) { inp.output_reference == input_ref })
-        let script_address = script_input.output.address
+    expect [script_input] =
+      list.filter(inputs, fn(inp) { inp.output_reference == input_ref })
+    let script_address = script_input.output.address
 
-        let UserDatum { admin_address, state, ticket_policy_id, end_date, .. } =
-          input_datum
+    let unique_script_input =
+      (
+        inputs
+          |> list.filter(fn(inp) { inp.output.address == script_address })
+          |> list.length
+      ) == 1
+
+    when redeemer is {
+      URModApprove { auth, is_approve } -> {
+        let UserDatum { state, ticket_policy_id, .. } = input_datum
 
         expect [script_output] =
           utils.find_outputs_with_address(outputs, script_address)
         let script_output_datum = user.find_datum(script_output.datum)
 
-        let admin_input_is_present =
-          (
-            inputs
-              |> utils.inputs_with_asset(
-                  admin_address,
-                  ticket_policy_id,
-                  "admin-machine",
-                )
-              |> list.length
-          ) == 1
-
         let before_end_date =
           interval.is_entirely_before(validity_range, end_date)
 
-        let right_user_state = state == USAwaiting
-        let right_user_value = and {
+        let mod_authenticated =
+          utils.nft_authenticated(
+            context.transaction,
+            auth,
+            ticket_policy_id,
+            "mod",
+          )
+
+        let right_state = state == USAwaiting
+        let right_value = and {
             utils.lovelace_geq(script_output.value, script_input.output.value),
             value.quantity_of(
               script_output.value,
@@ -58,7 +63,7 @@ validator {
             ) == 1,
           }
 
-        let right_user_datum =
+        let right_datum =
           if is_approve {
             script_output_datum == UserDatum {
               ..input_datum,
@@ -72,11 +77,12 @@ validator {
           }
 
         and {
-          admin_input_is_present?,
+          unique_script_input?,
+          mod_authenticated?,
           before_end_date?,
-          right_user_state?,
-          right_user_value?,
-          right_user_datum,
+          right_state?,
+          right_value?,
+          right_datum,
         }
       }
       URAddVote(auth, vote_asset_name) -> {
@@ -84,8 +90,7 @@ validator {
           list.filter(inputs, fn(inp) { inp.output_reference == input_ref })
         let script_address = script_input.output.address
 
-        let UserDatum { votes, ticket_policy_id, vote_policy_id, end_date, .. } =
-          input_datum
+        let UserDatum { votes, ticket_policy_id, .. } = input_datum
 
         let user_output =
           utils.find_output_with_asset(
@@ -99,12 +104,13 @@ validator {
         let before_end_date =
           interval.is_entirely_before(validity_range, end_date)
 
-        let right_user_value =
+        let right_value =
           utils.lovelace_geq(user_output.value, script_input.output.value)
 
-        let right_user_datum =
+        let right_datum =
           user_output_datum == UserDatum {
             ..input_datum,
+            state: USVoted,
             votes: [vote_asset_name, ..votes],
           }
 
@@ -116,20 +122,14 @@ validator {
         let vote_authenticated =
           context.transaction
             |> utils.nft_authenticated(auth, vote_policy_id, vote_asset_name)
-        let unique_script_input =
-          (
-            inputs
-              |> list.filter(fn(inp) { inp.output.address == script_address })
-              |> list.length
-          ) == 1
 
         and {
+          unique_script_input?,
           before_end_date?,
-          right_user_value?,
-          right_user_datum?,
+          right_value?,
+          right_datum?,
           vote_not_repeated?,
           vote_authenticated?,
-          unique_script_input?,
         }
       }
       URCollect -> {
@@ -144,28 +144,9 @@ validator {
           )
         let admin_input_datum = admin.find_datum(admin_input.output.datum)
 
-        expect [admin_output] =
-          utils.outputs_with_asset(
-            outputs,
-            admin_address,
-            ticket_policy_id,
-            "admin-machine",
-          )
-        let admin_output_datum = admin.find_datum(admin_output.datum)
+        let correct_admin_input_state = admin_input_datum.state == ASVoting
 
-        let correct_admin_input_state =
-          when admin_input_datum is {
-            ADVoting { .. } -> True
-            _ -> False
-          }
-
-        let correct_admin_output_state =
-          when admin_output_datum is {
-            ADRewards { .. } -> True
-            _ -> False
-          }
-
-        correct_admin_input_state? && correct_admin_output_state?
+        correct_admin_input_state?
       }
     }
   }

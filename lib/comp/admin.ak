@@ -1,46 +1,46 @@
+use aiken/math/rational
 use aiken/time.{PosixTime}
 use aiken/transaction.{Datum, InlineDatum}
 use aiken/transaction/credential.{Address}
 use aiken/transaction/value.{AssetName, PolicyId}
 use comp/utils.{Auth}
 
+pub type AdminParams {
+  reward_rates: RewardRates,
+  end_date: PosixTime,
+  vote_policy_id: PolicyId,
+  admin_price: Int,
+  user_price: Int,
+}
+
+pub type AdminState {
+  ASVoting
+  ASRewarding
+}
+
 pub type AdminDatum {
-  ADVoting {
-    user_address: Address,
-    admin_price: Int,
-    user_price: Int,
-    ticket_policy_id: PolicyId,
-    vote_policy_id: PolicyId,
-    end_date: PosixTime,
-    reward_rates: RewardRates,
-    approved_votes: Int,
-  }
-  ADRewards {
-    total_amount: Int,
-    reward_rates: RewardRates,
-    ticket_policy_id: PolicyId,
-    vote_policy_id: PolicyId,
-    first: (Option<AssetName>, List<AssetName>),
-    second: (Option<AssetName>, List<AssetName>),
-    third: (Option<AssetName>, List<AssetName>),
-  }
+  state: AdminState,
+  user_address: Address,
+  total_approved: Int,
+  total_amount: Int,
+  ticket_policy_id: PolicyId,
+  user_rewards: List<Int>,
+  user_asset_names: List<AssetName>,
+  user_claimed: List<AssetName>,
+  vote_rewards: List<Int>,
+  vote_asset_names: List<List<AssetName>>,
+  vote_claimed: List<AssetName>,
 }
 
 pub type ClaimerRole {
-  CRFirstUser
-  CRFirstVoter { index: Int }
-
-  CRSecondUser
-  CRSecondVoter { index: Int }
-
-  CRThirdUser
-  CRThirdVoter { index: Int }
+  CRUser { index: Int }
+  CRVoter { index: Int }
 }
 
 pub type AdminRedeemer {
-  ARModApprove { auth: Auth }
+  ARModApprove
   ARCollectRewards { auth: Auth }
-  ARClaimRewards { auth: Auth, role: ClaimerRole }
+  ARClaimRewards { auth: Auth, asset_name: AssetName, role: ClaimerRole }
 }
 
 pub type WinnerRate {
@@ -51,13 +51,17 @@ pub type WinnerRate {
 pub type RewardRates {
   admin: Int,
   moderator: Int,
-  first: WinnerRate,
-  second: WinnerRate,
-  third: WinnerRate,
+  winners: List<WinnerRate>,
 }
 
 pub fn find_datum(datum: Datum) -> AdminDatum {
   expect InlineDatum(datum_raw) = datum
   expect datum: AdminDatum = datum_raw
   datum
+}
+
+pub fn calculate_rate(total_amount: Int, rate_abs: Int) -> Int {
+  expect Some(rate) = rational.new(rate_abs, 100)
+
+  rational.mul(rate, rational.from_int(total_amount)) |> rational.truncate
 }
