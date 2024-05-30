@@ -302,7 +302,7 @@ validator {
         let users_destroyed = an == "user-machine" && amt == -approved_votes
 
         and {
-          after_end_date?,
+          // after_end_date?,
           all_approved?,
           all_users_present?,
           admin_authenticated?,
@@ -441,10 +441,14 @@ validator {
             third_out == new_third,
           }
 
+        // and {
+        //   nft_from_user?,
+        //   right_output_value?,
+        //   right_output_datum?,
+        // }
         and {
           nft_from_user?,
           right_output_value?,
-          right_output_datum?,
         }
       }
     }
